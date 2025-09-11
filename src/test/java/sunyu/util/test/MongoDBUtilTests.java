@@ -1,6 +1,7 @@
 package sunyu.util.test;
 
 import cn.hutool.core.date.LocalDateTimeUtil;
+import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.map.MapUtil;
 import cn.hutool.log.Log;
 import cn.hutool.log.LogFactory;
@@ -39,6 +40,9 @@ public class MongoDBUtilTests {
     // SIM信息集合实例
     static MongoCollection<Document> simInfoCollection;
 
+    static MongoDatabase nrvpDatabase;
+    static MongoCollection<Document> vcCollection;
+
     /**
      * 在所有测试方法执行前运行
      * 初始化MongoDB连接和相关工具类
@@ -50,12 +54,16 @@ public class MongoDBUtilTests {
         // 创建MongoDB工具类实例并设置连接URI
         mongoDBUtil = MongoDBUtil.builder()
                 // MongoDB连接字符串，包含用户名、密码、主机地址和连接参数
-                .setUri("mongodb://root:Bcuser%262025@192.168.13.131:27000,192.168.13.133:27000/?authSource=admin&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
+                //.setUri("mongodb://root:Bcuser%262025@192.168.13.131:27000,192.168.13.133:27000/?authSource=admin&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
+                .setUri("mongodb://bcuser:Bcld%262025@123.124.91.28:19700/?authSource=sim&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
                 .build();
         // 获取sim数据库实例
         simDatabase = mongoDBUtil.getDatabase("sim");
         // 获取sim_info集合实例
         simInfoCollection = mongoDBUtil.getCollection(simDatabase, "sim_info");
+
+        nrvpDatabase = mongoDBUtil.getDatabase("nrvp");
+        vcCollection = nrvpDatabase.getCollection("v_c");
     }
 
     /**
@@ -65,6 +73,19 @@ public class MongoDBUtilTests {
     @AfterAll
     static void afterClass() {
         mongoDBUtil.close();
+    }
+
+    @Test
+    void testQuery() {
+        int i = 0;
+        for (String vin : FileUtil.readUtf8Lines("d:/tmp/1.txt")) {
+            Document v = vcCollection.find(Filters.eq("vin", vin)).first();
+            log.info("{} {}", vin, v);
+            if (v == null) {
+                i++;
+            }
+        }
+        log.info("{}", i);
     }
 
     /**
@@ -276,6 +297,34 @@ public class MongoDBUtilTests {
             log.info("{}", jsonUtil.objToJson(doc));
         }
     }
+
+    @Test
+    void testGroup3() {
+        List<Bson> pipeline = new ArrayList<>();
+        pipeline.add(Aggregates.match(Filters.and(
+                Filters.gt("gps_time", LocalDateTimeUtil.parse("2024-01-01 03:00:00", "yyyy-MM-dd HH:mm:ss")),
+                Filters.lt("gps_time", LocalDateTimeUtil.parse("2025-02-01 03:40:00", "yyyy-MM-dd HH:mm:ss"))
+        )));
+        pipeline.add(
+                Aggregations.group(MapUtil.of("did", "$did"),
+                        Accumulators.sum("count", 1))
+        );
+        pipeline.add(Aggregates.sort(Sorts.orderBy(
+                Sorts.descending("count"), // 按count字段降序排序
+                Sorts.ascending("_id.did")) // 按_id.device_customer_name字段升序排序
+        ));
+        pipeline.add(Aggregates.project(Projections.fields(
+                Projections.excludeId(), // 排除_id字段
+                Projections.computed("设备号",
+                        Expressions.ifNull("$_id.did", "无")),
+                Projections.include("count") // 包含count字段
+        )));
+        log.info("[{}] {}", vcCollection.getNamespace(), mongoDBUtil.toAggregationsJson(pipeline));
+        for (Document doc : vcCollection.aggregate(pipeline)) {
+            log.info("{}", jsonUtil.objToJson(doc));
+        }
+    }
+
 
     /**
      * 测试计数操作
