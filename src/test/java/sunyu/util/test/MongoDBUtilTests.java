@@ -54,8 +54,8 @@ public class MongoDBUtilTests {
         // 创建MongoDB工具类实例并设置连接URI
         mongoDBUtil = MongoDBUtil.builder()
                 // MongoDB连接字符串，包含用户名、密码、主机地址和连接参数
-                //.setUri("mongodb://root:Bcuser%262025@192.168.13.131:27000,192.168.13.133:27000/?authSource=admin&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
-                .setUri("mongodb://bcuser:Bcld%262025@123.124.91.28:19700/?authSource=sim&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
+                .setUri("mongodb://root:Bcuser%262025@192.168.13.131:27000,192.168.13.133:27000/?authSource=admin&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
+                //.setUri("mongodb://bcuser:Bcld%262025@123.124.91.28:19700/?authSource=sim&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
                 .build();
         // 获取sim数据库实例
         simDatabase = mongoDBUtil.getDatabase("sim");
@@ -95,7 +95,7 @@ public class MongoDBUtilTests {
     @Test
     void testFindFirst() {
         // 查找集合中的第一条记录
-        Document simInfo = simInfoCollection.find().first();
+        Document simInfo = simInfoCollection.find(Filters.eq("device_id","XDR13102509200055")).first();
         // 使用MongoDB原生方式输出JSON
         log.info("{}", simInfo.toJson());
         // 使用自定义JSON工具类输出JSON

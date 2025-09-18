@@ -26,6 +26,7 @@ public class MongoDBUtil implements AutoCloseable {
     private MongoDBUtil(Config config) {
         log.info("[构建 {}] 开始", this.getClass().getSimpleName());
         //其他初始化语句
+        log.info("[构建参数] uri：{}", config.uri);
         config.mongoClient = MongoClients.create(config.uri);
         log.info("[构建 {}] 结束", this.getClass().getSimpleName());
         this.config = config;
