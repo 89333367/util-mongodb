@@ -1,19 +1,21 @@
 package sunyu.util;
 
-import cn.hutool.log.Log;
-import cn.hutool.log.LogFactory;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.json.JsonMode;
 import org.bson.json.JsonWriterSettings;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+
+import cn.hutool.log.Log;
+import cn.hutool.log.LogFactory;
 
 public class MongoDBUtil implements AutoCloseable {
     private final Log log = LogFactory.get();
@@ -112,7 +114,6 @@ public class MongoDBUtil implements AutoCloseable {
         return "[" + String.join(",", stageJsons) + "]";
     }
 
-
     /**
      * 将Map结构转换为MongoDB Document对象
      *
@@ -144,6 +145,5 @@ public class MongoDBUtil implements AutoCloseable {
         map.forEach(doc::append);
         return doc;
     }
-
 
 }

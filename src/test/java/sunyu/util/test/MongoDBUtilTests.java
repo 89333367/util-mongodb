@@ -1,28 +1,34 @@
 package sunyu.util.test;
 
-import cn.hutool.core.date.LocalDateTimeUtil;
-import cn.hutool.core.io.FileUtil;
-import cn.hutool.core.map.MapUtil;
-import cn.hutool.log.Log;
-import cn.hutool.log.LogFactory;
-import com.mongodb.client.FindIterable;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoCursor;
-import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Accumulators;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Sorts;
+
+import cn.hutool.core.date.LocalDateTimeUtil;
+import cn.hutool.core.io.FileUtil;
+import cn.hutool.core.map.MapUtil;
+import cn.hutool.log.Log;
+import cn.hutool.log.LogFactory;
 import sunyu.util.Aggregations;
 import sunyu.util.Expressions;
 import sunyu.util.JsonUtil;
 import sunyu.util.MongoDBUtil;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 
 /**
  * MongoDB工具类测试类
@@ -95,7 +101,7 @@ public class MongoDBUtilTests {
     @Test
     void testFindFirst() {
         // 查找集合中的第一条记录
-        Document simInfo = simInfoCollection.find(Filters.eq("device_id","XDR13102509200055")).first();
+        Document simInfo = simInfoCollection.find(Filters.eq("device_id", "XDR13102509200055")).first();
         // 使用MongoDB原生方式输出JSON
         log.info("{}", simInfo.toJson());
         // 使用自定义JSON工具类输出JSON
@@ -113,8 +119,7 @@ public class MongoDBUtilTests {
                 // create_time大于指定时间
                 Filters.gt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:00:00", "yyyy-MM-dd HH:mm:ss")),
                 // create_time小于指定时间
-                Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss"))
-        );
+                Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss")));
         // 执行查找操作
         FindIterable<Document> list = simInfoCollection.find(filter);
         // 限制返回结果数量为10条
@@ -158,9 +163,10 @@ public class MongoDBUtilTests {
         try (MongoCursor<Document> cursor = simInfoCollection
                 // 构造时间范围过滤条件
                 .find(Filters.and(
-                        Filters.gt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:00:00", "yyyy-MM-dd HH:mm:ss")),
-                        Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss"))
-                ))
+                        Filters.gt("create_time",
+                                LocalDateTimeUtil.parse("2025-05-09 03:00:00", "yyyy-MM-dd HH:mm:ss")),
+                        Filters.lt("create_time",
+                                LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss"))))
                 // 获取游标
                 .cursor()) {
             // 遍历游标中的所有文档
@@ -182,8 +188,7 @@ public class MongoDBUtilTests {
         // 添加匹配阶段：过滤create_time在指定时间范围内的文档
         pipeline.add(Aggregates.match(Filters.and(
                 Filters.gt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:00:00", "yyyy-MM-dd HH:mm:ss")),
-                Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss"))
-        )));
+                Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss")))));
         // 添加排序阶段：按create_time字段降序排序
         pipeline.add(Aggregates.sort(Sorts.descending("create_time")));
         // 添加投影阶段：排除_id字段，包含sim_iccid和create_time字段
@@ -213,8 +218,7 @@ public class MongoDBUtilTests {
         // 添加匹配阶段：过滤create_time在指定时间范围内的文档
         pipeline.add(Aggregates.match(Filters.and(
                 Filters.gt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:00:00", "yyyy-MM-dd HH:mm:ss")),
-                Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss"))
-        )));
+                Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss")))));
         // 添加排序阶段：按create_time字段降序排序
         pipeline.add(Aggregates.sort(Sorts.descending("create_time")));
         // 添加投影阶段：排除_id字段，包含sim_iccid和create_time字段
@@ -252,8 +256,7 @@ public class MongoDBUtilTests {
                 Projections.excludeId(), // 排除_id字段
                 // 使用计算字段将_id.status重命名为"卡状态"
                 // $_id.status表示引用分组结果中_id对象的status字段
-                Projections.computed("卡状态", "$_id.status")
-        )));
+                Projections.computed("卡状态", "$_id.status"))));
 
         // 执行聚合管道并遍历结果
         for (Document doc : simInfoCollection.aggregate(pipeline)) {
@@ -272,8 +275,7 @@ public class MongoDBUtilTests {
         // 添加分组阶段：按device_customer_name字段分组，并统计每组的文档数量
         pipeline.add(
                 Aggregations.group(MapUtil.of("customerName", "$device_customer_name"),
-                        Accumulators.sum("count", 1))
-        );
+                        Accumulators.sum("count", 1)));
         // 添加排序阶段：先按count降序排序，再按_id.device_customer_name升序排序
         pipeline.add(Aggregates.sort(Sorts.orderBy(
                 Sorts.descending("count"), // 按count字段降序排序
@@ -303,12 +305,10 @@ public class MongoDBUtilTests {
         List<Bson> pipeline = new ArrayList<>();
         pipeline.add(Aggregates.match(Filters.and(
                 Filters.gt("gps_time", LocalDateTimeUtil.parse("2024-01-01 03:00:00", "yyyy-MM-dd HH:mm:ss")),
-                Filters.lt("gps_time", LocalDateTimeUtil.parse("2025-02-01 03:40:00", "yyyy-MM-dd HH:mm:ss"))
-        )));
+                Filters.lt("gps_time", LocalDateTimeUtil.parse("2025-02-01 03:40:00", "yyyy-MM-dd HH:mm:ss")))));
         pipeline.add(
                 Aggregations.group(MapUtil.of("did", "$did"),
-                        Accumulators.sum("count", 1))
-        );
+                        Accumulators.sum("count", 1)));
         pipeline.add(Aggregates.sort(Sorts.orderBy(
                 Sorts.descending("count"), // 按count字段降序排序
                 Sorts.ascending("_id.did")) // 按_id.device_customer_name字段升序排序
@@ -325,7 +325,6 @@ public class MongoDBUtilTests {
         }
     }
 
-
     /**
      * 测试计数操作
      * 验证统计满足条件的文档数量的功能
@@ -337,8 +336,7 @@ public class MongoDBUtilTests {
                 // sim_plan字段不存在
                 Filters.not(Filters.exists("sim_plan")),
                 // sim_plan字段为null
-                Filters.eq("sim_plan", null)
-        ));
+                Filters.eq("sim_plan", null)));
         log.info("total: {}", total);
     }
 

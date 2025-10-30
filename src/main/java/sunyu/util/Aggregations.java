@@ -1,11 +1,12 @@
 package sunyu.util;
 
-import com.mongodb.client.model.Aggregates;
-import com.mongodb.client.model.BsonField;
+import java.util.Map;
+
 import org.bson.Document;
 import org.bson.conversions.Bson;
 
-import java.util.Map;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.BsonField;
 
 /**
  * 聚合管道扩展工具类
@@ -47,4 +48,3 @@ public final class Aggregations {
         return Aggregates.group(idDoc, accumulators);
     }
 }
-
