@@ -1,34 +1,31 @@
 package sunyu.util.test;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-
-import org.bson.Document;
-import org.bson.conversions.Bson;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-
-import com.mongodb.client.FindIterable;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoCursor;
-import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.Accumulators;
-import com.mongodb.client.model.Aggregates;
-import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.Projections;
-import com.mongodb.client.model.Sorts;
-
 import cn.hutool.core.date.LocalDateTimeUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.map.MapUtil;
 import cn.hutool.log.Log;
 import cn.hutool.log.LogFactory;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.*;
+import com.mongodb.client.result.InsertOneResult;
+import com.mongodb.client.result.UpdateResult;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import sunyu.util.Aggregations;
 import sunyu.util.Expressions;
 import sunyu.util.JsonUtil;
 import sunyu.util.MongoDBUtil;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * MongoDB工具类测试类
@@ -60,7 +57,8 @@ public class MongoDBUtilTests {
         // 创建MongoDB工具类实例并设置连接URI
         mongoDBUtil = MongoDBUtil.builder()
                 // MongoDB连接字符串，包含用户名、密码、主机地址和连接参数
-                .setUri("mongodb://root:Bcuser%262025@192.168.13.131:27000,192.168.13.133:27000/?authSource=admin&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
+                .setUri("mongodb://bcuser:Bcld&2025@192.168.13.134:27017/?authSource=sim&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
+                //.setUri("mongodb://root:Bcuser%262025@192.168.13.131:27000,192.168.13.133:27000/?authSource=admin&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
                 //.setUri("mongodb://bcuser:Bcld%262025@123.124.91.28:19700/?authSource=sim&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
                 .build();
         // 获取sim数据库实例
@@ -79,6 +77,21 @@ public class MongoDBUtilTests {
     @AfterAll
     static void afterClass() {
         mongoDBUtil.close();
+    }
+
+    @Test
+    void 查找sim卡号() {
+        String sim_msisdn = "1440000584570";
+        long count = simInfoCollection.countDocuments(Filters.eq("sim_msisdn", sim_msisdn));
+        log.debug("{} 找到 {} 条记录", sim_msisdn, count);
+        if (count == 1) {
+            Document simInfo = simInfoCollection.find(Filters.eq("sim_msisdn", sim_msisdn)).first();
+            log.debug("{}", jsonUtil.objToJson(simInfo));
+        } else if (count > 1) {
+            log.error("{} 找到多条", sim_msisdn);
+        } else {
+            log.info("{} 未找到", sim_msisdn);
+        }
     }
 
     @Test
@@ -384,9 +397,23 @@ public class MongoDBUtilTests {
      * 插入一个文档
      */
     @Test
-    void insertOne() {
-        HashMap<String, Object> m = new HashMap<>();
-        simInfoCollection.insertOne(mongoDBUtil.mapToDocument(m));
+    void testInsertOne() {
+        Map<String, Object> m = new HashMap<>();
+        InsertOneResult insertOneResult = mongoDBUtil.insertOne(simInfoCollection, m);
+        log.info("{}", insertOneResult);
+    }
+
+    @Test
+    void testUpdate() {
+        Bson filter = Filters.eq("sim_iccid", "2");
+        Document simIccid = simInfoCollection.find(filter).first();
+        log.info("{}", jsonUtil.objToJson(simIccid));
+        if (simIccid != null) {
+            UpdateResult updateResult = mongoDBUtil.saveOrUpdate(simInfoCollection, filter, new HashMap<String, Object>() {{
+                put("sim_msisdn", "2");
+            }});
+            log.info("{}", updateResult);
+        }
     }
 
 }
