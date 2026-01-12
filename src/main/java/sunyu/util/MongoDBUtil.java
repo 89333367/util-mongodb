@@ -10,6 +10,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.UpdateManyModel;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
 import com.mongodb.client.model.WriteModel;
@@ -194,6 +195,45 @@ public class MongoDBUtil implements AutoCloseable {
 
     public BulkWriteResult bulkWrite(MongoCollection<Document> collection, List<? extends WriteModel<? extends Document>> requests) {
         return collection.bulkWrite(requests);
+    }
+
+    public UpdateManyModel<Document> saveOrUpdateManyModel(Bson filter, Map<String, ?> data, Boolean forceUpdate) {
+        // 获取当前时间
+        LocalDateTime now = LocalDateTime.now();
+
+        // 构建更新操作
+        List<Bson> updates = new ArrayList<>();
+
+        // 设置create_time（只在插入时生效，使用$setOnInsert）
+        updates.add(Updates.setOnInsert(config.CREATE_TIME, now));
+
+        // 设置update_time（每次都会更新，使用$set）
+        updates.add(Updates.set(config.UPDATE_TIME, now));
+
+        // 设置数据字段（使用$set操作符）
+        if (MapUtil.isNotEmpty(data)) {
+            data.forEach((key, value) -> {
+                if (Convert.toBool(forceUpdate, false)) {
+                    // value是不是为空，都要更新到数据库
+                    updates.add(Updates.set(key, value));
+                } else if (value != null) {
+                    // value不是空，才更新到数据库
+                    if (value instanceof String) {
+                        String nv = Convert.toStr(value, "").trim();
+                        if (StrUtil.isNotBlank(nv)) {
+                            // 不是空字符串，才更新到数据库
+                            updates.add(Updates.set(key, nv));
+                        }
+                    } else {
+                        updates.add(Updates.set(key, value));
+                    }
+                }
+            });
+        }
+
+        // 执行upsert操作
+        UpdateOptions options = new UpdateOptions().upsert(true);
+        return new UpdateManyModel<>(filter, Updates.combine(updates), options);
     }
 
 }

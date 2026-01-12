@@ -1,8 +1,10 @@
 package sunyu.util.test;
 
+import cn.hutool.core.convert.Convert;
 import cn.hutool.core.date.LocalDateTimeUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.map.MapUtil;
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.log.Log;
 import cn.hutool.log.LogFactory;
 import com.mongodb.client.FindIterable;
@@ -17,15 +19,17 @@ import org.bson.conversions.Bson;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.ttzero.excel.reader.ExcelReader;
+import org.ttzero.excel.reader.Row;
 import sunyu.util.Aggregations;
 import sunyu.util.Expressions;
 import sunyu.util.JsonUtil;
 import sunyu.util.MongoDBUtil;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.io.IOException;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.util.*;
 
 /**
  * MongoDB工具类测试类
@@ -45,6 +49,15 @@ public class MongoDBUtilTests {
 
     static MongoDatabase nrvpDatabase;
     static MongoCollection<Document> vcCollection;
+
+    static List<String> dateFormats = Arrays.asList(
+            "yyyy-MM-dd HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss.SS", "yyyy-MM-dd HH:mm:ss.S",
+            "yyyy-MM-dd HH:mm:ss", "yyyy/MM/dd HH:mm:ss",
+            "yyyy-M-d HH:mm:ss", "yyyy/M/d HH:mm:ss",
+            "yyyy-MM-dd", "yyyy/MM/dd",
+            "yyyy-M-d", "yyyy/M/d",
+            "yyyy年M月d日", "yyyy年MM月dd日"
+    );
 
     /**
      * 在所有测试方法执行前运行
@@ -414,6 +427,176 @@ public class MongoDBUtilTests {
             }});
             log.info("{}", updateResult);
         }
+    }
+
+    LocalDateTime getLocalDateTime(Object value) {
+        String v = Convert.toStr(value, null);
+        if (StrUtil.isNotBlank(v)) {
+            v = v.trim();
+            for (String dateFormat : dateFormats) {
+                try {
+                    return LocalDateTimeUtil.parse(v, dateFormat);
+                } catch (Exception e) {
+                }
+            }
+            throw new RuntimeException("日期格式错误：" + v);
+        }
+        return null;
+    }
+
+    @Test
+    void 数据排查() {
+        try (ExcelReader reader = ExcelReader.read(Paths.get("D:/tmp/发货记录汇总/2025年合 - 终版.xlsx"))) {
+            reader.sheet(0).header(1).rows().map(Row::toMap).forEach(row -> {
+                String sim_iccid = Convert.toStr(row.get("ICCID(不可重复)"), null);
+                String sim_msisdn = Convert.toStr(row.get("SIM卡号(不可重复)"), null);
+                String device_id = Convert.toStr(row.get("终端编号（必填）"), null);
+                String device_working_condition_id = Convert.toStr(row.get("工况ID(不可重复)"), null);
+                String device_imei = Convert.toStr(row.get("IMEI(不可重复)"), null);
+                LocalDateTime device_shipping_time = getLocalDateTime(row.get("发货时间(必填)"));
+                String device_customer_name = Convert.toStr(row.get("客户名称(必填)"), null);
+                String device_model = Convert.toStr("终端型号", null);
+                String device_type = Convert.toStr("终端类型", null);
+                LocalDateTime service_expiration_time = getLocalDateTime(row.get("服务到期时间"));
+                String device_logistics_no = Convert.toStr(row.get("物流单号"), null);
+                Document simInfo = null;
+                long count;
+                if (StrUtil.isNotBlank(sim_iccid)) {
+                    sim_iccid = sim_iccid.trim();
+                    if (sim_iccid.length() != 19 && sim_iccid.length() != 20) {
+                        log.error("sim_iccid {} 长度错误", sim_iccid);
+                        return;
+                    }
+                    Bson filter = Filters.eq("sim_iccid", sim_iccid.trim());
+                    count = simInfoCollection.countDocuments(filter);
+                    if (count == 0) {
+                        //log.warn("找不到 sim_iccid {}，准备新增", sim_iccid);
+                        simInfo = new Document();
+                        simInfo.put("sim_iccid", sim_iccid.trim());
+                    } else {
+                        simInfo = simInfoCollection.find(filter).first();
+                        //log.debug("通过sim_iccid找到了 {}", simInfo);
+                    }
+                }
+                if (simInfo == null && StrUtil.isNotBlank(sim_msisdn)) {
+                    sim_msisdn = sim_msisdn.trim();
+                    Bson filter = Filters.eq("sim_msisdn", sim_msisdn.trim());
+                    count = simInfoCollection.countDocuments(filter);
+                    if (count == 0) {
+                        log.error("找不到 sim_msisdn {}", sim_msisdn);
+                        return;
+                    } else if (count > 1) {
+                        log.error("sim_msisdn {} 重复", sim_msisdn);
+                        return;
+                    }
+                    simInfo = simInfoCollection.find(filter).first();
+                    //log.debug("通过sim_msisdn找到了 {}", simInfo);
+                }
+                if (simInfo == null) {
+                    log.error("输入参数错误 sim_iccid {} sim_msisdn {} device_id {} device_imei {} device_working_condition_id {}", sim_iccid, sim_msisdn, device_id, device_imei, device_working_condition_id);
+                    return;
+                }
+            });
+        } catch (IOException ex) {
+            log.error(ex.getMessage());
+        }
+        log.info("done");
+    }
+
+    @Test
+    void 刷写数据() {
+        try (ExcelReader reader = ExcelReader.read(Paths.get("D:/tmp/发货记录汇总/2025年合 - 终版.xlsx"))) {
+            reader.sheet(0).header(1).rows().map(Row::toMap).forEach(row -> {
+                log.debug("准备处理 {}", row);
+                String sim_iccid = Convert.toStr(row.get("ICCID(不可重复)"), null);
+                String sim_msisdn = Convert.toStr(row.get("SIM卡号(不可重复)"), null);
+                String device_id = Convert.toStr(row.get("终端编号（必填）"), null);
+                String device_working_condition_id = Convert.toStr(row.get("工况ID(不可重复)"), null);
+                String device_imei = Convert.toStr(row.get("IMEI(不可重复)"), null);
+                LocalDateTime device_shipping_time = getLocalDateTime(row.get("发货时间(必填)"));
+                String device_customer_name = Convert.toStr(row.get("客户名称(必填)"), null);
+                String device_model = Convert.toStr("终端型号", null);
+                String device_type = Convert.toStr("终端类型", null);
+                LocalDateTime service_expiration_time = getLocalDateTime(row.get("服务到期时间"));
+                String device_logistics_no = Convert.toStr(row.get("物流单号"), null);
+                Document simInfo = null;
+                long count;
+                if (StrUtil.isNotBlank(sim_iccid)) {
+                    sim_iccid = sim_iccid.trim();
+                    if (sim_iccid.length() != 19 && sim_iccid.length() != 20) {
+                        log.error("sim_iccid {} 长度错误", sim_iccid);
+                        return;
+                    }
+                    Bson filter = Filters.eq("sim_iccid", sim_iccid);
+                    count = simInfoCollection.countDocuments(filter);
+                    if (count == 0) {
+                        log.warn("找不到 sim_iccid {}，准备新增", sim_iccid);
+                        simInfo = new Document();
+                        simInfo.put("sim_iccid", sim_iccid);
+                    } else {
+                        simInfo = simInfoCollection.find(filter).first();
+                        log.debug("通过sim_iccid找到了 {}", simInfo);
+                    }
+                }
+                if (simInfo == null && StrUtil.isNotBlank(sim_msisdn)) {
+                    sim_msisdn = sim_msisdn.trim();
+                    Bson filter = Filters.eq("sim_msisdn", sim_msisdn);
+                    count = simInfoCollection.countDocuments(filter);
+                    if (count == 0) {
+                        log.error("找不到 sim_msisdn {}", sim_msisdn);
+                        return;
+                    } else if (count > 1) {
+                        log.error("sim_msisdn {} 重复", sim_msisdn);
+                        return;
+                    }
+                    simInfo = simInfoCollection.find(filter).first();
+                    log.debug("通过sim_msisdn找到了 {}", simInfo);
+                }
+                if (simInfo == null) {
+                    log.error("输入参数错误 sim_iccid {} sim_msisdn {} device_id {} device_imei {} device_working_condition_id {}", sim_iccid, sim_msisdn, device_id, device_imei, device_working_condition_id);
+                    return;
+                }
+
+                Map<String, Object> map = new HashMap<>();
+                if (!simInfo.containsKey("sim_msisdn") && StrUtil.isNotBlank(sim_msisdn)) {
+                    map.put("sim_msisdn", sim_msisdn.trim());
+                }
+                if (!simInfo.containsKey("device_id") && StrUtil.isNotBlank(device_id)) {
+                    map.put("device_id", device_id.trim());
+                }
+                if (!simInfo.containsKey("device_working_condition_id") && StrUtil.isNotBlank(device_working_condition_id)) {
+                    map.put("device_working_condition_id", device_working_condition_id.trim());
+                }
+                if (!simInfo.containsKey("device_imei") && StrUtil.isNotBlank(device_imei)) {
+                    map.put("device_imei", device_imei.trim());
+                }
+                if (!simInfo.containsKey("device_shipping_time") && device_shipping_time != null) {
+                    map.put("device_shipping_time", device_shipping_time);
+                }
+                if (!simInfo.containsKey("device_customer_name") && StrUtil.isNotBlank(device_customer_name)) {
+                    map.put("device_customer_name", device_customer_name.trim());
+                }
+                if (!simInfo.containsKey("device_model") && StrUtil.isNotBlank(device_model)) {
+                    map.put("device_model", device_model.trim());
+                }
+                if (!simInfo.containsKey("device_type") && StrUtil.isNotBlank(device_type)) {
+                    map.put("device_type", device_type.trim());
+                }
+                if (!simInfo.containsKey("service_expiration_time") && service_expiration_time != null) {
+                    map.put("service_expiration_time", service_expiration_time);
+                }
+                if (!simInfo.containsKey("device_logistics_no") && StrUtil.isNotBlank(device_logistics_no)) {
+                    map.put("device_logistics_no", device_logistics_no.trim());
+                }
+                if (MapUtil.isNotEmpty(map)) {
+                    UpdateResult updateResult = mongoDBUtil.saveOrUpdate(simInfoCollection, Filters.eq("sim_iccid", simInfo.getString("sim_iccid")), map);
+                    log.debug("更新结果 {}", updateResult);
+                }
+            });
+        } catch (IOException ex) {
+            log.error(ex.getMessage());
+        }
+        log.info("done");
     }
 
 }

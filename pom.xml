@@ -91,6 +91,14 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- https://central.sonatype.com/artifact/org.ttzero/eec/versions -->
+        <dependency>
+            <groupId>org.ttzero</groupId>
+            <artifactId>eec</artifactId>
+            <version>0.5.27</version>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <build>
