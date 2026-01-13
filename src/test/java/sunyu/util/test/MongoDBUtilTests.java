@@ -662,7 +662,7 @@ public class MongoDBUtilTests {
                 String sim_status_raw = row.get("卡状态").toString();
                 String sim_status = sim_status_raw;
                 log.debug("sim_iccid {} sim_msisdn {} sim_status_raw {} sim_status {}", sim_iccid, sim_msisdn, sim_status_raw, sim_status);
-                Document simInfo = null;
+                Document simInfo;
                 Bson filter = Filters.eq("sim_iccid", sim_iccid);
                 long count = simInfoCollection.countDocuments(filter);
                 if (count == 0) {
@@ -686,6 +686,73 @@ public class MongoDBUtilTests {
             log.error(ex.getMessage());
         }
         log.info("done");
+    }
+
+    @Test
+    void 统计不要的列() {
+        Bson filter = Filters.or(
+                Filters.exists("device_display_id"),
+                Filters.exists("device_base_id")
+        );
+        long count = simInfoCollection.countDocuments(filter);
+        log.info("有 {} 条数据有 device_display_id 或 device_base_id 字段", count);
+    }
+
+    @Test
+    void 查询不要的列() {
+        Bson filter = Filters.or(
+                Filters.exists("device_display_id"),
+                Filters.exists("device_base_id")
+        );
+        Document first = simInfoCollection.find(filter).first();
+        log.debug("{}", first.toJson());
+    }
+
+    @Test
+    void 删除不要的列() {
+        // device_display_id
+        // device_base_id
+        // 查询有这两列的数据，然后删除这两列，但是保持其他列信息
+        Bson filter = Filters.or(
+                Filters.exists("device_display_id"),
+                Filters.exists("device_base_id")
+        );
+
+        // 使用游标流式处理，避免内存溢出
+        try (MongoCursor<Document> cursor = simInfoCollection.find(filter).iterator()) {
+            int processedCount = 0;
+            int updatedCount = 0;
+
+            while (cursor.hasNext()) {
+                Document doc = cursor.next();
+                log.debug("{}", doc.toJson());
+                String simIccid = doc.getString("sim_iccid");
+
+                if (StrUtil.isNotBlank(simIccid)) {
+                    // 构建只删除指定字段的更新操作
+                    Bson update = Updates.combine(
+                            Updates.unset("device_display_id"),
+                            Updates.unset("device_base_id")
+                    );
+                    Bson docFilter = Filters.eq("sim_iccid", simIccid);
+
+                    UpdateResult result = simInfoCollection.updateOne(docFilter, update);
+                    if (result.getModifiedCount() > 0) {
+                        updatedCount++;
+                        log.debug("已删除 sim_iccid={} 的 device_display_id 和 device_base_id 字段", simIccid);
+                    }
+                }
+
+                processedCount++;
+                if (processedCount % 1000 == 0) {
+                    log.info("已处理 {} 条数据，已更新 {} 条数据", processedCount, updatedCount);
+                }
+            }
+
+            log.info("处理完成：共处理 {} 条数据，更新 {} 条数据", processedCount, updatedCount);
+        } catch (Exception e) {
+            log.error("处理过程中出错", e);
+        }
     }
 
 }
