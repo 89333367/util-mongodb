@@ -5,6 +5,9 @@ import cn.hutool.core.date.LocalDateTimeUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.http.HttpRequest;
+import cn.hutool.http.HttpResponse;
+import cn.hutool.http.HttpUtil;
 import cn.hutool.log.Log;
 import cn.hutool.log.LogFactory;
 import com.mongodb.client.FindIterable;
@@ -25,6 +28,7 @@ import sunyu.util.Aggregations;
 import sunyu.util.Expressions;
 import sunyu.util.JsonUtil;
 import sunyu.util.MongoDBUtil;
+import sunyu.util.relocations.jackson.com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.nio.file.Paths;
@@ -592,6 +596,91 @@ public class MongoDBUtilTests {
                     UpdateResult updateResult = mongoDBUtil.saveOrUpdate(simInfoCollection, Filters.eq("sim_iccid", simInfo.getString("sim_iccid")), map);
                     log.debug("更新结果 {}", updateResult);
                 }
+            });
+        } catch (IOException ex) {
+            log.error(ex.getMessage());
+        }
+        log.info("done");
+    }
+
+
+    void 查询天盛泰丰卡状态(Document simInfo) {
+        String url = "http://47.104.243.180:12000/api/card/card/list?pageNum=1&pageSize=10&cardNo=" + simInfo.getString("sim_iccid");
+        HttpRequest get = HttpUtil.createGet(url);
+        get.header("Authorization", "Bearer eyJhbGciOiJIUzUxMiJ9.eyJsb2dpbl91c2VyX2tleSI6ImIwMzdiZWFkLTg0MGUtNDc4MC04Njk2LWZlYmVjZmY0NmFiZCJ9.AK4o6Acm2i6m8sOkzExRq-25QcO-7pwAP8uYZiRNq921DS0aXfd8CSfUwlOzrqtCrFbrDCrzZ0iB5SMS5WQfgg");
+        HttpResponse response = get.execute();
+        log.debug("response {}", response.body());
+        JsonNode jsonNode = jsonUtil.readTree(response.body());
+        log.debug("激活时间 {}", jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/activeTime").textValue());
+        log.debug("开卡时间 {}", jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/openTime").textValue());
+        // 1：待激活 2：已激活 4：停机 6：可测试 7：库存 8：预销户
+        String status = jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/status").textValue();
+        String statusName;
+        switch (status) {
+            case "1":
+                statusName = "待激活";
+                break;
+            case "2":
+                statusName = "已激活";
+                break;
+            case "4":
+                statusName = "停机";
+                break;
+            case "6":
+                statusName = "可测试";
+                break;
+            case "7":
+                statusName = "库存";
+                break;
+            case "8":
+                statusName = "预销户";
+                break;
+            default:
+                statusName = "未知";
+                break;
+        }
+        log.debug("状态 {} {}", status, statusName);
+        Map<String, Object> map = new HashMap<>();
+        map.put("sim_msisdn", simInfo.getString("sim_msisdn"));
+        map.put("sim_activation_time", getLocalDateTime(jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/activeTime").textValue()));
+        map.put("sim_purchase_time", getLocalDateTime(jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/openTime").textValue()));
+        map.put("sim_status_raw", simInfo.getString("sim_status"));
+        map.put("sim_status", simInfo.getString("sim_status"));
+        map.put("api_type", "天盛泰丰");
+        if (MapUtil.isNotEmpty(map)) {
+            UpdateResult updateResult = mongoDBUtil.saveOrUpdate(simInfoCollection, Filters.eq("sim_iccid", simInfo.getString("sim_iccid")), map);
+            log.debug("更新结果 {}", updateResult);
+        }
+    }
+
+    @Test
+    void 更新天盛泰丰卡状态() {
+        try (ExcelReader reader = ExcelReader.read(Paths.get("D:/tmp/card_1768205410152.xlsx"))) {
+            reader.sheet(0).header(1).rows().map(Row::toMap).forEach(row -> {
+                String sim_iccid = row.get("iccid").toString();
+                String sim_msisdn = row.get("msisdn").toString();
+                String sim_status_raw = row.get("卡状态").toString();
+                String sim_status = sim_status_raw;
+                log.debug("sim_iccid {} sim_msisdn {} sim_status_raw {} sim_status {}", sim_iccid, sim_msisdn, sim_status_raw, sim_status);
+                Document simInfo = null;
+                Bson filter = Filters.eq("sim_iccid", sim_iccid);
+                long count = simInfoCollection.countDocuments(filter);
+                if (count == 0) {
+                    log.warn("找不到 sim_iccid {}，准备新增", sim_iccid);
+                    simInfo = new Document();
+                    simInfo.put("sim_iccid", sim_iccid);
+                } else {
+                    simInfo = simInfoCollection.find(filter).first();
+                    log.debug("通过sim_iccid找到了 {}", simInfo);
+                }
+                if (!simInfo.containsKey("sim_msisdn") && StrUtil.isNotBlank(sim_msisdn)) {
+                    simInfo.put("sim_msisdn", sim_msisdn.trim());
+                }
+                if (!simInfo.containsKey("sim_status_raw") && StrUtil.isNotBlank(sim_status_raw)) {
+                    simInfo.put("sim_status_raw", sim_status_raw.trim());
+                    simInfo.put("sim_status", sim_status.trim());
+                }
+                查询天盛泰丰卡状态(simInfo);
             });
         } catch (IOException ex) {
             log.error(ex.getMessage());
