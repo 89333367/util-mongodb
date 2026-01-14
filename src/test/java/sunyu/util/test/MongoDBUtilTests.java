@@ -607,7 +607,7 @@ public class MongoDBUtilTests {
     void 查询天盛泰丰卡状态(Document simInfo) {
         String url = "http://47.104.243.180:12000/api/card/card/list?pageNum=1&pageSize=10&cardNo=" + simInfo.getString("sim_iccid");
         HttpRequest get = HttpUtil.createGet(url);
-        get.header("Authorization", "Bearer eyJhbGciOiJIUzUxMiJ9.eyJsb2dpbl91c2VyX2tleSI6ImIwMzdiZWFkLTg0MGUtNDc4MC04Njk2LWZlYmVjZmY0NmFiZCJ9.AK4o6Acm2i6m8sOkzExRq-25QcO-7pwAP8uYZiRNq921DS0aXfd8CSfUwlOzrqtCrFbrDCrzZ0iB5SMS5WQfgg");
+        get.header("Authorization", "Bearer eyJhbGciOiJIUzUxMiJ9.eyJsb2dpbl91c2VyX2tleSI6IjZmMGIxODkxLTQ3OTUtNDY0OS1hZTg2LTU2NWY4Nzc2MTM2YiJ9.1rC86ubyuHWGbb_MKmuwYMVB2XYLVxZK85cNR5bzyO6VL8V6hRQ26nyHBF5N1B-WxT3H81KRSIZXWjWMKOpZgg");
         HttpResponse response = get.execute();
         log.debug("response {}", response.body());
         JsonNode jsonNode = jsonUtil.readTree(response.body());
@@ -673,10 +673,10 @@ public class MongoDBUtilTests {
                     simInfo = simInfoCollection.find(filter).first();
                     log.debug("通过sim_iccid找到了 {}", simInfo);
                 }
-                if (!simInfo.containsKey("sim_msisdn") && StrUtil.isNotBlank(sim_msisdn)) {
+                if (StrUtil.isNotBlank(sim_msisdn)) {
                     simInfo.put("sim_msisdn", sim_msisdn.trim());
                 }
-                if (!simInfo.containsKey("sim_status_raw") && StrUtil.isNotBlank(sim_status_raw)) {
+                if (StrUtil.isNotBlank(sim_status_raw)) {
                     simInfo.put("sim_status_raw", sim_status_raw.trim());
                     simInfo.put("sim_status", sim_status.trim());
                 }
