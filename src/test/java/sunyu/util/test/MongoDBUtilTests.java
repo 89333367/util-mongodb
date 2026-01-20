@@ -10,6 +10,10 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.*;
+import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.InsertManyResult;
+import com.mongodb.client.result.InsertOneResult;
+import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.AfterAll;
@@ -22,7 +26,9 @@ import sunyu.util.test.entity.SimInfo;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * MongoDB工具类测试类
@@ -43,6 +49,7 @@ public class MongoDBUtilTests {
     // SIM信息集合实例
     static MongoCollection<Document> simInfoCollection;
     static MongoCollection<Document> trafficInfoCollection;
+    static MongoCollection<Document> testCollection;
 
     static List<String> dateFormats = Arrays.asList(
             "yyyy-MM-dd HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss.SS", "yyyy-MM-dd HH:mm:ss.S", "yyyy-MM-dd HH:mm:ss"
@@ -69,6 +76,8 @@ public class MongoDBUtilTests {
         simInfoCollection = mongoDBUtil.getCollection(simDatabase, "sim_info");
         // 获取traffic_info集合实例
         trafficInfoCollection = mongoDBUtil.getCollection(simDatabase, "traffic_info");
+        // 用于测试的集合
+        testCollection = mongoDBUtil.getCollection(simDatabase, "test");
     }
 
     /**
@@ -356,6 +365,35 @@ public class MongoDBUtilTests {
     }
 
     @Test
+    void sim_info链接traffic_info2() {
+        LocalDateTime a = LocalDateTimeUtil.parse("2025-12-01T00:00:00");
+        LocalDateTime b = LocalDateTimeUtil.parse("2026-01-01T00:00:00");
+        List<Document> documents = mongoDBUtil.leftOuterJoin(new MongoQuery(simInfoCollection)
+                .setSort(Sorts.descending("update_time"))
+                .setRightCollectionName("traffic_info")
+                .setLeftJoinField("sim_iccid").setRightJoinField("sim_iccid")
+                /*.setRightFilter(
+                        Filters.and(
+                                Filters.gte("traffic_time", a),
+                                Filters.lt("traffic_time", b)
+                        )
+                )*/
+                .setRightLimit(10)
+                .setRightProjection(Projections.fields(
+                        Projections.excludeId(),
+                        Projections.exclude("create_time", "update_time")
+                ))
+                .setPage(1, 5)
+                .setProjection(Projections.fields(
+                        Projections.excludeId()
+                ))
+        );
+        for (Document document : documents) {
+            log.info("{}", JSONUtil.toJsonStr(document, jsonConfig));
+        }
+    }
+
+    @Test
     void sim_info链接traffic_info() {
         LocalDateTime a = LocalDateTimeUtil.parse("2025-12-01T00:00:00");
         LocalDateTime b = LocalDateTimeUtil.parse("2026-01-01T00:00:00");
@@ -421,6 +459,99 @@ public class MongoDBUtilTests {
                 log.info("{}", doc.toJson());
             }
         }
+    }
+
+
+    @Test
+    void 分组卡商和卡状态() {
+        List<Document> group = mongoDBUtil.group(new MongoQuery(simInfoCollection)
+                .setGroupFields(Arrays.asList("api_type", "sim_status_raw", "sim_status"))
+                .setTotalName("total")
+                .setSort(Sorts.orderBy(
+                        Sorts.ascending("api_type"),
+                        Sorts.descending("total")
+                ))
+        );
+        for (Document document : group) {
+            log.info("卡商：{}，卡商返回状态：{}，导入状态：{}，总数：{}",
+                    document.get("api_type"),
+                    document.get("sim_status_raw"),
+                    document.get("sim_status"),
+                    document.get("total")
+            );
+        }
+    }
+
+
+    @Test
+    void 测试写入map() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("a", 1);
+        map.put("b", true);
+        map.put("c", null);
+        map.put("d", "hello");
+        map.put("e", LocalDateTime.now());
+        InsertOneResult result = mongoDBUtil.insertOne(testCollection, map);
+        log.info("{}", result);
+
+        Map<String, Object> map2 = new HashMap<>();
+        map2.putAll(map);
+        map2.put("a", "2");
+
+        Map<String, Object> map3 = new HashMap<>();
+        map3.putAll(map);
+        map3.put("a", "3");
+
+        InsertManyResult insertManyResult = mongoDBUtil.insertMany(testCollection, Arrays.asList(map2, map3));
+        log.info("{}", insertManyResult);
+    }
+
+    @Test
+    void 测试写入实体() {
+        SimInfo simInfo = new SimInfo();
+        simInfo.setSimIccid("iccid1234567890");
+        simInfo.setSimMsisdn("msisdn1234567890");
+        simInfo.setDeviceId("did1234567890");
+        simInfo.setDeviceCustomerName("张三");
+        simInfo.setDeviceShippingTime(LocalDateTime.now());
+        InsertOneResult result = mongoDBUtil.insertOneEntity(testCollection, simInfo);
+        log.info("{}", result);
+
+        SimInfo simInfo2 = new SimInfo();
+        simInfo2.setSimIccid("iccid1234567891");
+        simInfo2.setSimMsisdn("msisdn1234567891");
+        simInfo2.setDeviceId("did1234567891");
+        simInfo2.setDeviceCustomerName("李四");
+        simInfo2.setDeviceShippingTime(LocalDateTime.now());
+
+        SimInfo simInfo3 = new SimInfo();
+        simInfo3.setSimIccid("iccid1234567892");
+        simInfo3.setSimMsisdn("msisdn1234567892");
+        simInfo3.setDeviceId("did1234567892");
+        simInfo3.setDeviceCustomerName("王五");
+        simInfo3.setDeviceShippingTime(LocalDateTime.now());
+
+        InsertManyResult insertManyResult = mongoDBUtil.insertManyEntity(testCollection, Arrays.asList(simInfo2, simInfo3));
+        log.info("{}", insertManyResult);
+    }
+
+    @Test
+    void 测试saveOrUpdate() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("a", 1);
+        UpdateResult updateResult = mongoDBUtil.saveOrUpdate(testCollection, Filters.eq("sim_iccid", "iccid1234567890"), map);
+        log.info("{}", updateResult);
+
+        SimInfo simInfo3 = new SimInfo();
+        simInfo3.setDeviceCustomerName("王五2");
+        UpdateResult updateResult1 = mongoDBUtil.saveOrUpdateEntity(testCollection, Filters.eq("sim_iccid", "iccid1234567892"), simInfo3);
+        log.info("{}", updateResult1);
+    }
+
+    @Test
+    void 测试delete() {
+        DeleteResult deleteResult = mongoDBUtil.delete(testCollection, Filters.eq("sim_iccid", "iccid1234567892"));
+        log.info("{}", deleteResult);
     }
 
 }

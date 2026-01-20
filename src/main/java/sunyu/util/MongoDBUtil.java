@@ -239,6 +239,13 @@ public class MongoDBUtil implements AutoCloseable {
         return collection.insertOne(document);
     }
 
+    public InsertOneResult insertOneEntity(MongoCollection<Document> collection, Object entity) {
+        Document document = toDocument(entity);
+        document.append(config.CREATE_TIME, LocalDateTime.now());
+        document.append(config.UPDATE_TIME, LocalDateTime.now());
+        return collection.insertOne(document);
+    }
+
     public InsertManyResult insertMany(MongoCollection<Document> collection, List<Map<String, ?>> dataList) {
         List<Document> documents = new ArrayList<>();
         for (Map<String, ?> data : dataList) {
@@ -251,8 +258,64 @@ public class MongoDBUtil implements AutoCloseable {
         return collection.insertMany(documents);
     }
 
+    public InsertManyResult insertManyEntity(MongoCollection<Document> collection, List<Object> entityList) {
+        List<Document> documents = new ArrayList<>();
+        for (Object entity : entityList) {
+            Document document = toDocument(entity);
+            document.append(config.CREATE_TIME, LocalDateTime.now());
+            document.append(config.UPDATE_TIME, LocalDateTime.now());
+            documents.add(document);
+        }
+        return collection.insertMany(documents);
+    }
+
     public UpdateResult saveOrUpdate(MongoCollection<Document> collection, Bson filter, Map<String, ?> data) {
         return saveOrUpdate(collection, filter, data, false);
+    }
+
+    public UpdateResult saveOrUpdateEntity(MongoCollection<Document> collection, Bson filter, Object entity) {
+        return saveOrUpdateEntity(collection, filter, entity, false);
+    }
+
+    public UpdateResult saveOrUpdateEntity(MongoCollection<Document> collection, Bson filter, Object entity, Boolean forceUpdate) {
+        // 获取当前时间
+        LocalDateTime now = LocalDateTime.now();
+
+        // 构建更新操作
+        List<Bson> updates = new ArrayList<>();
+
+        // 设置create_time（只在插入时生效，使用$setOnInsert）
+        updates.add(Updates.setOnInsert(config.CREATE_TIME, now));
+
+        // 设置update_time（每次都会更新，使用$set）
+        updates.add(Updates.set(config.UPDATE_TIME, now));
+
+        // 转换实体为文档
+        Document document = toDocument(entity);
+
+        // 设置数据字段（使用$set操作符）
+        document.forEach((key, value) -> {
+            if (Convert.toBool(forceUpdate, false)) {
+                // value是不是为空，都要更新到数据库
+                updates.add(Updates.set(key, value));
+            } else if (value != null) {
+                // value不是空，才更新到数据库
+                if (value instanceof String) {
+                    String nv = Convert.toStr(value, "").trim();
+                    if (StrUtil.isNotBlank(nv)) {
+                        // 不是空字符串，才更新到数据库
+                        updates.add(Updates.set(key, nv));
+                    }
+                } else {
+                    updates.add(Updates.set(key, value));
+                }
+            }
+        });
+
+        // 执行upsert操作
+        UpdateOptions options = new UpdateOptions().upsert(true);
+        // 会更新所有匹配filter的数据
+        return collection.updateMany(filter, Updates.combine(updates), options);
     }
 
     public UpdateResult saveOrUpdate(MongoCollection<Document> collection, Bson filter, Map<String, ?> data, Boolean forceUpdate) {
@@ -385,7 +448,6 @@ public class MongoDBUtil implements AutoCloseable {
             }
 
             return document;
-
         } catch (Exception e) {
             throw new RuntimeException("实体转换文档失败: " + e.getMessage(), e);
         }
