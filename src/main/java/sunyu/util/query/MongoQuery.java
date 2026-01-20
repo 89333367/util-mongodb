@@ -21,6 +21,14 @@ public class MongoQuery {
     private List<String> groupFields = new ArrayList<>();
     private String totalName;
 
+    private String rightCollectionName;
+    private String leftJoinField;
+    private String rightJoinField;
+    private Bson rightProjection;
+    private Integer rightLimit = 1;
+    private Bson rightFilter = Filters.empty();
+    private Boolean mergeRightObjectsToLeft;
+
     /**
      * 创建一个查询对象
      *
@@ -177,11 +185,23 @@ public class MongoQuery {
         return groupFields;
     }
 
+    /**
+     * 设置分组字段
+     *
+     * @param groupFields 分组字段
+     * @return 当前查询对象
+     */
     public MongoQuery setGroupFields(List<String> groupFields) {
         this.groupFields = groupFields;
         return this;
     }
 
+    /**
+     * 设置分组字段
+     *
+     * @param groupField 分组字段
+     * @return 当前查询对象
+     */
     public MongoQuery setGroupField(String groupField) {
         this.groupFields = Collections.singletonList(groupField);
         return this;
@@ -191,8 +211,120 @@ public class MongoQuery {
         return totalName;
     }
 
+    /**
+     * 设置分组字段的统计字段名
+     *
+     * @param totalName 统计字段名，如果为null则不做分组明细统计
+     * @return 当前查询对象
+     */
     public MongoQuery setTotalName(String totalName) {
         this.totalName = totalName;
+        return this;
+    }
+
+    public String getRightCollectionName() {
+        return rightCollectionName;
+    }
+
+    /**
+     * 设置右表集合名称
+     *
+     * @param rightCollectionName 右表集合名称
+     * @return 当前查询对象
+     */
+    public MongoQuery setRightCollectionName(String rightCollectionName) {
+        this.rightCollectionName = rightCollectionName;
+        return this;
+    }
+
+    public String getLeftJoinField() {
+        return leftJoinField;
+    }
+
+    /**
+     * 设置左表连接字段
+     *
+     * @param leftJoinField 左表连接字段
+     * @return 当前查询对象
+     */
+    public MongoQuery setLeftJoinField(String leftJoinField) {
+        this.leftJoinField = leftJoinField;
+        return this;
+    }
+
+    public String getRightJoinField() {
+        return rightJoinField;
+    }
+
+    /**
+     * 设置右表连接字段
+     *
+     * @param rightJoinField 右表连接字段
+     * @return 当前查询对象
+     */
+    public MongoQuery setRightJoinField(String rightJoinField) {
+        this.rightJoinField = rightJoinField;
+        return this;
+    }
+
+    public Bson getRightProjection() {
+        return rightProjection;
+    }
+
+    /**
+     * 设置右表投影字段
+     *
+     * @param rightProjection 右表投影字段
+     * @return 当前查询对象
+     */
+    public MongoQuery setRightProjection(Bson rightProjection) {
+        this.rightProjection = rightProjection;
+        return this;
+    }
+
+    public Integer getRightLimit() {
+        return rightLimit;
+    }
+
+    /**
+     * 设置右表返回的记录数
+     *
+     * @param rightLimit 右表返回的记录数
+     * @return 当前查询对象
+     */
+    public MongoQuery setRightLimit(Integer rightLimit) {
+        this.rightLimit = rightLimit;
+        return this;
+    }
+
+
+    public Bson getRightFilter() {
+        return rightFilter;
+    }
+
+    /**
+     * 设置右表连接过滤条件
+     *
+     * @param rightFilter 右表连接过滤条件
+     * @return 当前查询对象
+     */
+    public MongoQuery setRightFilter(Bson rightFilter) {
+        this.rightFilter = rightFilter;
+        return this;
+    }
+
+    public Boolean getMergeRightObjectsToLeft() {
+        return mergeRightObjectsToLeft;
+    }
+
+    /**
+     * 设置是否将右表的第一条记录合并到左表中
+     *
+     * @param mergeRightObjectsToLeft 是否合并到左表
+     * @return 当前查询对象
+     */
+    public MongoQuery setMergeRightObjectsToLeft(Boolean mergeRightObjectsToLeft) {
+        this.mergeRightObjectsToLeft = mergeRightObjectsToLeft;
         return this;
     }
 }

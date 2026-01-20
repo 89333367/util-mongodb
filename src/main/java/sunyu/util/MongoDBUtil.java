@@ -62,8 +62,6 @@ public class MongoDBUtil implements AutoCloseable {
          * 默认使用UTC时区与MongoDB保持一致
          */
         public ZoneId defaultZoneId = ZoneOffset.UTC;
-
-        public String TOTAL_NAME = "totalGroups";
     }
 
     public static class Builder {
@@ -186,7 +184,7 @@ public class MongoDBUtil implements AutoCloseable {
 
         } catch (Exception e) {
             // 转换失败时，记录警告并返回null
-            System.err.println("类型转换失败: " + value.getClass() + " -> " + targetType + ", 值: " + value);
+            log.warn("类型转换失败: {} -> {}, 值: {} {}", value.getClass(), targetType, value, e.getMessage());
             return null;
         }
 
@@ -393,7 +391,12 @@ public class MongoDBUtil implements AutoCloseable {
         }
     }
 
-
+    /**
+     * 统计符合查询条件的文档数量
+     *
+     * @param mongoQuery 查询对象
+     * @return 文档数量
+     */
     public long count(MongoQuery mongoQuery) {
         if (CollUtil.isEmpty(mongoQuery.getGroupFields())) {
             return mongoQuery.getCollection().countDocuments(mongoQuery.getFilter());
@@ -409,18 +412,26 @@ public class MongoDBUtil implements AutoCloseable {
                 groupDocument.append(groupField, "$" + groupField);
             }
             pipeline.add(Aggregates.group(groupDocument));
-            pipeline.add(Aggregates.count(config.TOTAL_NAME));
+            pipeline.add(Aggregates.count("__totalGroups"));
 
             log.debug("Aggregation Pipeline: {}", toAggregationsJson(pipeline));
 
             Document result = mongoQuery.getCollection().aggregate(pipeline).first();
             if (result != null) {
-                return result.getInteger(config.TOTAL_NAME);
+                return result.getInteger("__totalGroups");
             }
         }
         return 0;
     }
 
+    /**
+     * 查询符合条件的第一个文档
+     *
+     * @param clazz      目标实体类
+     * @param mongoQuery 查询对象
+     * @param <T>        实体类型
+     * @return 转换后的实体对象
+     */
     public <T> T findFirst(Class<T> clazz, MongoQuery mongoQuery) {
         FindIterable<Document> documents = mongoQuery.getCollection().find(mongoQuery.getFilter());
         if (mongoQuery.getProjection() != null) {
@@ -429,10 +440,24 @@ public class MongoDBUtil implements AutoCloseable {
         return toEntity(documents.first(), clazz);
     }
 
+    /**
+     * 查询符合条件的第一个文档
+     *
+     * @param mongoQuery 查询对象
+     * @return MongoDB文档
+     */
     public Document findFirst(MongoQuery mongoQuery) {
         return findFirst(Document.class, mongoQuery);
     }
 
+    /**
+     * 查询符合条件的文档列表
+     *
+     * @param clazz      目标实体类
+     * @param mongoQuery 查询对象
+     * @param <T>        实体类型
+     * @return 转换后的实体对象列表
+     */
     public <T> List<T> find(Class<T> clazz, MongoQuery mongoQuery) {
         FindIterable<Document> documents = mongoQuery.getCollection().find(mongoQuery.getFilter());
         if (mongoQuery.getProjection() != null) {
@@ -453,7 +478,12 @@ public class MongoDBUtil implements AutoCloseable {
         return results;
     }
 
-
+    /**
+     * 查询符合条件的文档列表
+     *
+     * @param mongoQuery 查询对象
+     * @return MongoDB文档列表
+     */
     public List<Document> find(MongoQuery mongoQuery) {
         return find(Document.class, mongoQuery);
     }
@@ -526,5 +556,96 @@ public class MongoDBUtil implements AutoCloseable {
         return results;
     }
 
+
+    public List<Document> leftOuterJoin(MongoQuery mongoQuery) {
+        List<Bson> pipeline = new ArrayList<>();
+
+        // 设置过滤条件
+        pipeline.add(Aggregates.match(mongoQuery.getFilter()));
+
+        // 构建排序
+        if (mongoQuery.getSort() != null) {
+            pipeline.add(Aggregates.sort(mongoQuery.getSort()));
+        }
+
+        // 构建lookup的pipeline
+        List<Bson> lookupPipeline = new ArrayList<>();
+        lookupPipeline.add(
+                // 在lookup内部进行过滤
+                Aggregates.match(
+                        Filters.and(
+                                mongoQuery.getRightFilter(),
+                                // 不带$符号的字段指的是被关联集合（右表）中的字段
+                                // 带$符号的字段指的是主文档（左表）中的字段
+                                Filters.expr(Filters.eq(mongoQuery.getRightJoinField(), "$" + mongoQuery.getLeftJoinField()))//使用expr引用外部字段
+                        )
+                )
+        );
+        if (mongoQuery.getRightProjection() != null) {
+            // 排除不需要 右表 中的字段
+            lookupPipeline.add(Aggregates.project(mongoQuery.getRightProjection()));
+        }
+        // 限制关联表的返回记录数量，默认只返回1条关联记录
+        lookupPipeline.add(Aggregates.limit(mongoQuery.getRightLimit()));
+
+        // 构建左外连接
+        pipeline.add(
+                Aggregates.lookup(
+                        mongoQuery.getRightCollectionName(),//链接的外部稽核名称
+                        lookupPipeline,
+                        mongoQuery.getRightCollectionName() + "__datas"//链接结果储存在主文档中的字段名
+                )
+        );
+
+        if (mongoQuery.getMergeRightObjectsToLeft() != null && mongoQuery.getMergeRightObjectsToLeft()) {
+            pipeline.add(
+                    // 使用$mergeObjects和$first替换根文档，将 右表 的字段合并到主文档
+                    Aggregates.replaceWith(
+                            // 创建$mergeObjects操作，用于合并多个文档
+                            new Document(
+                                    "$mergeObjects", // MongoDB聚合操作符：合并多个文档
+                                    // 要合并的文档列表
+                                    Arrays.asList(
+                                            "$$ROOT", // 表示当前文档（主文档）
+                                            // 创建$first操作，用于获取数组中的第一个元素
+                                            new Document(
+                                                    "$first", // MongoDB聚合操作符：获取数组第一个元素
+                                                    "$" + mongoQuery.getRightCollectionName() + "__datas" // 从关联字段结果（数组）中获取第一个元素
+                                            )
+                                    )
+                            )
+                    )
+            );
+            pipeline.add(
+                    Aggregates.project(Projections.fields(
+                            Projections.exclude(mongoQuery.getRightCollectionName() + "__datas")// 已经进行合并了，那么这个列应该是没用了
+                    ))
+            );
+        }
+
+        // 排除 左表 不要的字段
+        if (mongoQuery.getProjection() != null) {
+            pipeline.add(Aggregates.project(mongoQuery.getProjection()));
+        }
+
+        //设置分页参数
+        if (mongoQuery.getSkip() != null) {
+            pipeline.add(Aggregates.skip(mongoQuery.getSkip()));
+        }
+        if (mongoQuery.getLimit() != null) {
+            pipeline.add(Aggregates.limit(mongoQuery.getLimit()));
+        }
+
+        log.debug("Aggregation Pipeline: {}", toAggregationsJson(pipeline));
+
+        // 查询
+        List<Document> results = new ArrayList<>();
+        try (MongoCursor<Document> cursor = mongoQuery.getCollection().aggregate(pipeline).iterator();) {
+            while (cursor.hasNext()) {
+                results.add(cursor.next());
+            }
+        }
+        return results;
+    }
 
 }

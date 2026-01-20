@@ -252,6 +252,39 @@ public class MongoDBUtilTests {
     }
 
     @Test
+    void traffic_info链接sim_info2() {
+        LocalDateTime a = LocalDateTimeUtil.parse("2025-12-01T00:00:00");
+        LocalDateTime b = LocalDateTimeUtil.parse("2026-01-01T00:00:00");
+        List<Document> documents = mongoDBUtil.leftOuterJoin(new MongoQuery(trafficInfoCollection)
+                // 左表过滤
+                .setFilter(Filters.and(
+                        Filters.gte("traffic_time", a),
+                        Filters.lt("traffic_time", b)
+                ))
+                // 左表排序
+                .setSort(Sorts.descending("billed_volume"))
+                // 左外连接
+                .setRightCollectionName("sim_info")
+                // 关联字段
+                .setLeftJoinField("sim_iccid").setRightJoinField("sim_iccid")
+                // 右表字段过滤
+                .setRightProjection(Projections.fields(
+                        Projections.excludeId(),
+                        Projections.exclude("create_time", "update_time")
+                ))
+                // 是否将右表第一条内容合并到左表中
+                .setMergeRightObjectsToLeft(true)
+                // 左表翻页
+                .setPage(1, 5)
+                // 返回左表字段
+                .setProjection(Projections.excludeId())
+        );
+        for (Document document : documents) {
+            log.info("{}", JSONUtil.toJsonStr(document, jsonConfig));
+        }
+    }
+
+    @Test
     void traffic_info链接sim_info() {
         LocalDateTime a = LocalDateTimeUtil.parse("2025-12-01T00:00:00");
         LocalDateTime b = LocalDateTimeUtil.parse("2026-01-01T00:00:00");
@@ -272,6 +305,8 @@ public class MongoDBUtilTests {
                                 // 在lookup内部进行过滤
                                 Aggregates.match(
                                         Filters.and(
+                                                // 不带$符号的字段指的是被关联集合（右表）中的字段
+                                                // 带$符号的字段指的是主文档（左表）中的字段
                                                 Filters.expr(Filters.eq("sim_iccid", "$sim_iccid"))// 使用$expr引用主文档的sim_iccid字段
                                         )
                                 ),
@@ -353,8 +388,6 @@ public class MongoDBUtilTests {
                         ),
                         "traffic_info_datas" // 连接结果存储在主文档中的字段名
                 ),
-                // 添加match条件，过滤掉traffic_info_datas数组为空的文档，实现内连接效果
-                Aggregates.match(Filters.expr(new Document("$gt", Arrays.asList(new Document("$size", "$traffic_info_datas"), 0)))),
                 // 使用$mergeObjects和$first替换根文档，将traffic_info的字段合并到主文档
                 Aggregates.replaceWith(
                         // 创建$mergeObjects操作，用于合并多个文档
