@@ -1,19 +1,14 @@
 package sunyu.util;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.map.MapUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.log.Log;
 import cn.hutool.log.LogFactory;
 import com.mongodb.bulk.BulkWriteResult;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.UpdateManyModel;
-import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.Updates;
-import com.mongodb.client.model.WriteModel;
+import com.mongodb.client.*;
+import com.mongodb.client.model.*;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.InsertManyResult;
 import com.mongodb.client.result.InsertOneResult;
@@ -22,11 +17,15 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.json.JsonMode;
 import org.bson.json.JsonWriterSettings;
+import org.bson.types.ObjectId;
+import sunyu.util.annotation.Column;
+import sunyu.util.query.MongoQuery;
 
+import java.lang.reflect.Field;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.*;
 
 public class MongoDBUtil implements AutoCloseable {
     private final Log log = LogFactory.get();
@@ -57,6 +56,14 @@ public class MongoDBUtil implements AutoCloseable {
 
         public final String CREATE_TIME = "create_time";
         public final String UPDATE_TIME = "update_time";
+
+        /**
+         * 默认时区配置
+         * 默认使用UTC时区与MongoDB保持一致
+         */
+        public ZoneId defaultZoneId = ZoneOffset.UTC;
+
+        public String TOTAL_NAME = "totalGroups";
     }
 
     public static class Builder {
@@ -71,6 +78,26 @@ public class MongoDBUtil implements AutoCloseable {
             config.uri = uri;
             return this;
         }
+
+        /**
+         * 设置默认时区
+         *
+         * @param zoneId 时区ID
+         */
+        public Builder setDefaultZoneId(ZoneId zoneId) {
+            config.defaultZoneId = zoneId;
+            return this;
+        }
+
+        /**
+         * 设置默认时区（基于TimeZone）
+         *
+         * @param timeZone 时区
+         */
+        public Builder setDefaultTimeZone(TimeZone timeZone) {
+            config.defaultZoneId = timeZone.toZoneId();
+            return this;
+        }
     }
 
     /**
@@ -83,6 +110,87 @@ public class MongoDBUtil implements AutoCloseable {
         config.uri = null;
         config.mongoClient.close();
         log.info("[销毁 {}] 结束", this.getClass().getSimpleName());
+    }
+
+    /**
+     * 类型转换方法
+     *
+     * @param value      原始值
+     * @param targetType 目标类型
+     * @return 转换后的值
+     */
+    private Object convertType(Object value, Class<?> targetType) {
+        // 处理null值
+        if (value == null) {
+            // 对于基本类型，返回默认值
+            if (targetType == int.class) return 0;
+            if (targetType == long.class) return 0L;
+            if (targetType == double.class) return 0.0;
+            if (targetType == boolean.class) return false;
+            if (targetType == float.class) return 0.0f;
+            if (targetType == short.class) return (short) 0;
+            if (targetType == byte.class) return (byte) 0;
+            if (targetType == char.class) return '\u0000';
+
+            // 对于包装类型和其他引用类型，返回null
+            return null;
+        }
+
+        // 如果类型已经匹配，直接返回
+        if (targetType.isAssignableFrom(value.getClass())) {
+            return value;
+        }
+
+        try {
+            // 日期类型转换（使用配置的时区）
+            if (targetType == LocalDateTime.class) {
+                if (value instanceof Date) {
+                    // 使用配置的时区进行转换
+                    return ((Date) value).toInstant().atZone(config.defaultZoneId).toLocalDateTime();
+                } else if (value instanceof String) {
+                    return LocalDateTime.parse(value.toString());
+                }
+            } else if (targetType == Date.class) {
+                if (value instanceof LocalDateTime) {
+                    // 使用配置的时区进行转换
+                    return Date.from(((LocalDateTime) value).atZone(config.defaultZoneId).toInstant());
+                }
+            }
+
+            // MongoDB ObjectId 转换
+            if (value instanceof ObjectId) {
+                String strValue = value.toString();
+                if (targetType == String.class) {
+                    return strValue;
+                }
+            }
+
+            // 基本类型转换
+            if (targetType == String.class) {
+                return value.toString();
+            } else if (targetType == int.class || targetType == Integer.class) {
+                return Integer.parseInt(value.toString());
+            } else if (targetType == long.class || targetType == Long.class) {
+                return Long.parseLong(value.toString());
+            } else if (targetType == double.class || targetType == Double.class) {
+                return Double.parseDouble(value.toString());
+            } else if (targetType == boolean.class || targetType == Boolean.class) {
+                return Boolean.parseBoolean(value.toString());
+            } else if (targetType == float.class || targetType == Float.class) {
+                return Float.parseFloat(value.toString());
+            } else if (targetType == short.class || targetType == Short.class) {
+                return Short.parseShort(value.toString());
+            } else if (targetType == byte.class || targetType == Byte.class) {
+                return Byte.parseByte(value.toString());
+            }
+
+        } catch (Exception e) {
+            // 转换失败时，记录警告并返回null
+            System.err.println("类型转换失败: " + value.getClass() + " -> " + targetType + ", 值: " + value);
+            return null;
+        }
+
+        return value;
     }
 
     /**
@@ -197,43 +305,226 @@ public class MongoDBUtil implements AutoCloseable {
         return collection.bulkWrite(requests);
     }
 
-    public UpdateManyModel<Document> saveOrUpdateManyModel(Bson filter, Map<String, ?> data, Boolean forceUpdate) {
-        // 获取当前时间
-        LocalDateTime now = LocalDateTime.now();
-
-        // 构建更新操作
-        List<Bson> updates = new ArrayList<>();
-
-        // 设置create_time（只在插入时生效，使用$setOnInsert）
-        updates.add(Updates.setOnInsert(config.CREATE_TIME, now));
-
-        // 设置update_time（每次都会更新，使用$set）
-        updates.add(Updates.set(config.UPDATE_TIME, now));
-
-        // 设置数据字段（使用$set操作符）
-        if (MapUtil.isNotEmpty(data)) {
-            data.forEach((key, value) -> {
-                if (Convert.toBool(forceUpdate, false)) {
-                    // value是不是为空，都要更新到数据库
-                    updates.add(Updates.set(key, value));
-                } else if (value != null) {
-                    // value不是空，才更新到数据库
-                    if (value instanceof String) {
-                        String nv = Convert.toStr(value, "").trim();
-                        if (StrUtil.isNotBlank(nv)) {
-                            // 不是空字符串，才更新到数据库
-                            updates.add(Updates.set(key, nv));
-                        }
-                    } else {
-                        updates.add(Updates.set(key, value));
-                    }
-                }
-            });
+    /**
+     * 将Document转换为指定类型的实体对象（可配置是否跳过null值）
+     *
+     * @param document MongoDB文档
+     * @param clazz    目标实体类
+     * @param <T>      实体类型
+     * @return 转换后的实体对象
+     */
+    public <T> T toEntity(Document document, Class<T> clazz) {
+        if (document == null) {
+            return null;
         }
 
-        // 执行upsert操作
-        UpdateOptions options = new UpdateOptions().upsert(true);
-        return new UpdateManyModel<>(filter, Updates.combine(updates), options);
+        try {
+            T entity = clazz.getDeclaredConstructor().newInstance();
+
+            // 获取所有字段
+            Field[] fields = clazz.getDeclaredFields();
+
+            for (Field field : fields) {
+                // 获取@Column注解
+                Column column = field.getAnnotation(Column.class);
+
+                if (column != null) {
+                    // 获取数据库列名
+                    String dbColumnName = column.column();
+
+                    // 从document中获取值
+                    Object value = document.get(dbColumnName);
+
+                    if (value == null) {
+                        continue;
+                    }
+
+                    // 设置字段可访问
+                    field.setAccessible(true);
+
+                    // 类型转换并设置值（包括null值处理）
+                    Object convertedValue = convertType(value, field.getType());
+
+                    field.set(entity, convertedValue);
+                }
+            }
+
+            return entity;
+        } catch (Exception e) {
+            throw new RuntimeException("文档转换失败: " + e.getMessage(), e);
+        }
     }
+
+    /**
+     * 将实体对象转换为Document
+     *
+     * @param entity 实体对象
+     * @return MongoDB文档
+     */
+    public Document toDocument(Object entity) {
+        if (entity == null) {
+            return null;
+        }
+
+        Document document = new Document();
+
+        try {
+            Class<?> clazz = entity.getClass();
+            Field[] fields = clazz.getDeclaredFields();
+
+            for (Field field : fields) {
+                Column column = field.getAnnotation(Column.class);
+
+                if (column != null) {
+                    String dbColumnName = column.column();
+                    field.setAccessible(true);
+                    Object value = field.get(entity);
+
+                    if (value != null) {
+                        document.append(dbColumnName, value);
+                    }
+                }
+            }
+
+            return document;
+
+        } catch (Exception e) {
+            throw new RuntimeException("实体转换文档失败: " + e.getMessage(), e);
+        }
+    }
+
+
+    public long count(MongoQuery mongoQuery) {
+        if (CollUtil.isEmpty(mongoQuery.getGroupFields())) {
+            return mongoQuery.getCollection().countDocuments(mongoQuery.getFilter());
+        } else {
+            List<Bson> pipeline = new ArrayList<>();
+
+            // 设置过滤条件
+            pipeline.add(Aggregates.match(mongoQuery.getFilter()));
+
+            // 构建分组字段
+            Document groupDocument = new Document();
+            for (String groupField : mongoQuery.getGroupFields()) {
+                groupDocument.append(groupField, "$" + groupField);
+            }
+            pipeline.add(Aggregates.group(groupDocument));
+            pipeline.add(Aggregates.count(config.TOTAL_NAME));
+
+            log.debug("Aggregation Pipeline: {}", toAggregationsJson(pipeline));
+
+            Document result = mongoQuery.getCollection().aggregate(pipeline).first();
+            if (result != null) {
+                return result.getInteger(config.TOTAL_NAME);
+            }
+        }
+        return 0;
+    }
+
+    public <T> T findFirst(Class<T> clazz, MongoQuery mongoQuery) {
+        FindIterable<Document> documents = mongoQuery.getCollection().find(mongoQuery.getFilter());
+        if (mongoQuery.getProjection() != null) {
+            documents.projection(mongoQuery.getProjection());
+        }
+        return toEntity(documents.first(), clazz);
+    }
+
+    public Document findFirst(MongoQuery mongoQuery) {
+        return findFirst(Document.class, mongoQuery);
+    }
+
+    public <T> List<T> find(Class<T> clazz, MongoQuery mongoQuery) {
+        FindIterable<Document> documents = mongoQuery.getCollection().find(mongoQuery.getFilter());
+        if (mongoQuery.getProjection() != null) {
+            documents.projection(mongoQuery.getProjection());
+        }
+        if (mongoQuery.getSkip() != null) {
+            documents.skip(mongoQuery.getSkip());
+        }
+        if (mongoQuery.getLimit() != null) {
+            documents.limit(mongoQuery.getLimit());
+        }
+        List<T> results = new ArrayList<>();
+        try (MongoCursor<Document> mongoCursor = documents.iterator();) {
+            while (mongoCursor.hasNext()) {
+                results.add(toEntity(mongoCursor.next(), clazz));
+            }
+        }
+        return results;
+    }
+
+
+    public List<Document> find(MongoQuery mongoQuery) {
+        return find(Document.class, mongoQuery);
+    }
+
+    /**
+     * 分组查询
+     *
+     * @param mongoQuery 分组查询对象
+     * @return 分组结果
+     */
+    public List<Document> group(MongoQuery mongoQuery) {
+        List<Bson> pipeline = new ArrayList<>();
+
+        // 设置过滤条件
+        pipeline.add(Aggregates.match(mongoQuery.getFilter()));
+
+        // 构建分组字段
+        Document groupDocument = new Document();
+        for (String groupField : mongoQuery.getGroupFields()) {
+            groupDocument.append(groupField, "$" + groupField);
+        }
+        if (StrUtil.isNotBlank(mongoQuery.getTotalName())) {
+            pipeline.add(Aggregates.group(groupDocument, Accumulators.sum(mongoQuery.getTotalName(), 1)));
+        } else {
+            pipeline.add(Aggregates.group(groupDocument));
+        }
+
+        // 构建投影字段
+        if (mongoQuery.getProjection() != null) {
+            pipeline.add(mongoQuery.getProjection());
+        } else {
+            List<Bson> projections = new ArrayList<>();
+            projections.add(Projections.excludeId());
+
+            // 遍历分组字段，生成computed投影
+            for (String groupField : mongoQuery.getGroupFields()) {
+                projections.add(Projections.computed(groupField, "$_id." + groupField));
+            }
+
+            // 如果总数字段不为空，则包含该字段
+            if (StrUtil.isNotBlank(mongoQuery.getTotalName())) {
+                projections.add(Projections.include(mongoQuery.getTotalName()));
+            }
+
+            pipeline.add(Aggregates.project(Projections.fields(projections)));
+        }
+
+        // 构建排序
+        if (mongoQuery.getSort() != null) {
+            pipeline.add(Aggregates.sort(mongoQuery.getSort()));
+        }
+
+        //设置分页参数
+        if (mongoQuery.getSkip() != null) {
+            pipeline.add(Aggregates.skip(mongoQuery.getSkip()));
+        }
+        if (mongoQuery.getLimit() != null) {
+            pipeline.add(Aggregates.limit(mongoQuery.getLimit()));
+        }
+
+        log.debug("Aggregation Pipeline: {}", toAggregationsJson(pipeline));
+
+        // 查询
+        List<Document> results = new ArrayList<>();
+        try (MongoCursor<Document> cursor = mongoQuery.getCollection().aggregate(pipeline).iterator();) {
+            while (cursor.hasNext()) {
+                results.add(cursor.next());
+            }
+        }
+        return results;
+    }
+
 
 }

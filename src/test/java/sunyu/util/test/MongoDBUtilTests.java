@@ -1,39 +1,28 @@
 package sunyu.util.test;
 
-import cn.hutool.core.convert.Convert;
 import cn.hutool.core.date.LocalDateTimeUtil;
-import cn.hutool.core.io.FileUtil;
-import cn.hutool.core.map.MapUtil;
-import cn.hutool.core.util.StrUtil;
-import cn.hutool.http.HttpRequest;
-import cn.hutool.http.HttpResponse;
-import cn.hutool.http.HttpUtil;
+import cn.hutool.json.JSONConfig;
+import cn.hutool.json.JSONUtil;
 import cn.hutool.log.Log;
 import cn.hutool.log.LogFactory;
-import com.mongodb.client.FindIterable;
+import cn.hutool.setting.dialect.Props;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.*;
-import com.mongodb.client.result.InsertOneResult;
-import com.mongodb.client.result.UpdateResult;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.ttzero.excel.reader.ExcelReader;
-import org.ttzero.excel.reader.Row;
-import sunyu.util.Aggregations;
-import sunyu.util.Expressions;
-import sunyu.util.JsonUtil;
 import sunyu.util.MongoDBUtil;
-import sunyu.util.relocations.jackson.com.fasterxml.jackson.databind.JsonNode;
+import sunyu.util.query.MongoQuery;
+import sunyu.util.test.entity.SimInfo;
 
-import java.io.IOException;
-import java.nio.file.Paths;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * MongoDB工具类测试类
@@ -42,25 +31,25 @@ import java.util.*;
 public class MongoDBUtilTests {
     // 日志记录器
     static Log log = LogFactory.get();
-    // JSON工具类实例
-    static JsonUtil jsonUtil;
+
+    static Props props = ConfigProperties.getProps();
+
+    JSONConfig jsonConfig = JSONConfig.create().setDateFormat("yyyy-MM-dd HH:mm:ss");
+
     // MongoDB工具类实例
     static MongoDBUtil mongoDBUtil;
     // SIM数据库实例
     static MongoDatabase simDatabase;
     // SIM信息集合实例
     static MongoCollection<Document> simInfoCollection;
-
-    static MongoDatabase nrvpDatabase;
-    static MongoCollection<Document> vcCollection;
+    static MongoCollection<Document> trafficInfoCollection;
 
     static List<String> dateFormats = Arrays.asList(
-            "yyyy-MM-dd HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss.SS", "yyyy-MM-dd HH:mm:ss.S",
-            "yyyy-MM-dd HH:mm:ss", "yyyy/MM/dd HH:mm:ss",
-            "yyyy-M-d HH:mm:ss", "yyyy/M/d HH:mm:ss",
-            "yyyy-MM-dd", "yyyy/MM/dd",
-            "yyyy-M-d", "yyyy/M/d",
-            "yyyy年M月d日", "yyyy年MM月dd日"
+            "yyyy-MM-dd HH:mm:ss.SSS", "yyyy-MM-dd HH:mm:ss.SS", "yyyy-MM-dd HH:mm:ss.S", "yyyy-MM-dd HH:mm:ss"
+            , "yyyy/MM/dd HH:mm:ss", "yyyy/M/d HH:mm:ss", "yyyy/MM/dd", "yyyy/M/d"
+            , "yyyy-M-d HH:mm:ss"
+            , "yyyy-MM-dd", "yyyy-M-d"
+            , "yyyy年M月d日", "yyyy年MM月dd日"
     );
 
     /**
@@ -69,22 +58,17 @@ public class MongoDBUtilTests {
      */
     @BeforeAll
     static void beforeClass() {
-        // 创建JSON工具类实例并设置时区为UTC
-        jsonUtil = JsonUtil.builder().setTimeZone("UTC").build();
         // 创建MongoDB工具类实例并设置连接URI
         mongoDBUtil = MongoDBUtil.builder()
                 // MongoDB连接字符串，包含用户名、密码、主机地址和连接参数
-                .setUri("mongodb://bcuser:Bcld&2025@192.168.13.134:27017/?authSource=sim&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
-                //.setUri("mongodb://root:Bcuser%262025@192.168.13.131:27000,192.168.13.133:27000/?authSource=admin&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
-                //.setUri("mongodb://bcuser:Bcld%262025@123.124.91.28:19700/?authSource=sim&compressors=snappy,zlib,zstd&zlibCompressionLevel=9")
+                .setUri(props.getStr("mongodb.uri"))
                 .build();
         // 获取sim数据库实例
         simDatabase = mongoDBUtil.getDatabase("sim");
         // 获取sim_info集合实例
         simInfoCollection = mongoDBUtil.getCollection(simDatabase, "sim_info");
-
-        nrvpDatabase = mongoDBUtil.getDatabase("nrvp");
-        vcCollection = nrvpDatabase.getCollection("v_c");
+        // 获取traffic_info集合实例
+        trafficInfoCollection = mongoDBUtil.getCollection(simDatabase, "traffic_info");
     }
 
     /**
@@ -97,661 +81,312 @@ public class MongoDBUtilTests {
     }
 
     @Test
-    void 查找sim卡号() {
-        String sim_msisdn = "1440000584570";
-        long count = simInfoCollection.countDocuments(Filters.eq("sim_msisdn", sim_msisdn));
-        log.debug("{} 找到 {} 条记录", sim_msisdn, count);
-        if (count == 1) {
-            Document simInfo = simInfoCollection.find(Filters.eq("sim_msisdn", sim_msisdn)).first();
-            log.debug("{}", jsonUtil.objToJson(simInfo));
-        } else if (count > 1) {
-            log.error("{} 找到多条", sim_msisdn);
+    void 统计全部sim卡数量() {
+        log.info("sim_info集合中的文档数量: {}", mongoDBUtil.count(new MongoQuery(simInfoCollection)));
+    }
+
+    @Test
+    void 统计未来一个月服务到期的卡数量() {
+        Bson filter = Filters.lt("service_expiration_time", LocalDate.now().plusMonths(1));
+        log.info("未来一个月服务到期的卡数量: {}", mongoDBUtil.count(new MongoQuery(simInfoCollection).setFilter(filter)));
+    }
+
+    @Test
+    void 统计无卡号信息卡数量() {
+        // 查询不存在sim_msisdn字段、或者字段为null、或者字段为空字符串的文档
+        Bson filter = Filters.or(
+                // 字段不存在
+                Filters.exists("sim_msisdn", false),
+                // 字段值为null
+                Filters.eq("sim_msisdn", null),
+                // 字段为空字符串或仅包含空白字符
+                Filters.regex("sim_msisdn", "^\\s*$")
+        );
+        log.info("无卡号信息的卡数量: {}", mongoDBUtil.count(new MongoQuery(simInfoCollection).setFilter(filter)));
+    }
+
+    @Test
+    void 统计没有卡号字段的卡数量() {
+        log.info("没有卡号字段的卡数量: {}", mongoDBUtil.count(new MongoQuery(simInfoCollection).setFilter(Filters.exists("sim_msisdn", false))));
+    }
+
+    @Test
+    void 统计sim_msisdn为null的卡数量() {
+        Bson filter = Filters.eq("sim_msisdn", null);
+        log.info("sim_msisdn为null的卡数量: {}", mongoDBUtil.count(new MongoQuery(simInfoCollection).setFilter(filter)));
+
+        Document document = mongoDBUtil.findFirst(new MongoQuery(simInfoCollection).setFilter(filter));
+        log.info("sim_msisdn为null的卡示例: {}", document.toJson());
+    }
+
+    @Test
+    void 读取一个文档() {
+        log.info("读取一个文档");
+        Document document = mongoDBUtil.findFirst(new MongoQuery(simInfoCollection));
+        if (document != null) {
+            log.info("原始文档: {}", document.toJson());
+            try {
+                // 使用基于注解的转换器将文档转换成 SimInfo 对象（跳过null值，避免类型转换错误）
+                SimInfo simInfo = mongoDBUtil.toEntity(document, SimInfo.class);
+                log.info("转换后的SimInfo对象: {}", simInfo);
+                log.info("转换后的SimInfo对象JSON: {}", JSONUtil.toJsonStr(simInfo, jsonConfig));
+                log.info("ICCID: {}", simInfo.getSimIccid());
+                log.info("手机号: {}", simInfo.getSimMsisdn());
+                log.info("设备ID: {}", simInfo.getDeviceId());
+                log.info("创建时间: {}", simInfo.getCreateTime());
+                log.info("更新时间: {}", simInfo.getUpdateTime());
+            } catch (Exception e) {
+                log.error("转换失败: {}", e.getMessage(), e);
+            }
         } else {
-            log.info("{} 未找到", sim_msisdn);
+            log.info("没有找到文档");
         }
     }
 
     @Test
-    void testQuery() {
-        int i = 0;
-        for (String vin : FileUtil.readUtf8Lines("d:/tmp/1.txt")) {
-            Document v = vcCollection.find(Filters.eq("vin", vin)).first();
-            log.info("{} {}", vin, v);
-            if (v == null) {
-                i++;
-            }
-        }
-        log.info("{}", i);
-    }
-
-    /**
-     * 测试查找第一条记录
-     * 验证能否成功连接数据库并获取第一条记录
-     */
-    @Test
-    void testFindFirst() {
-        // 查找集合中的第一条记录
-        Document simInfo = simInfoCollection.find(Filters.eq("device_id", "XDR13102509200055")).first();
-        // 使用MongoDB原生方式输出JSON
-        log.info("{}", simInfo.toJson());
-        // 使用自定义JSON工具类输出JSON
-        log.info("{}", jsonUtil.objToJson(simInfo));
-    }
-
-    /**
-     * 测试带条件和限制数量的查找
-     * 验证按时间范围过滤并限制返回记录数量的功能
-     */
-    @Test
-    void testFindLimit() {
-        // 构造时间范围过滤条件：create_time在指定时间范围内
-        Bson filter = Filters.and(
-                // create_time大于指定时间
-                Filters.gt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:00:00", "yyyy-MM-dd HH:mm:ss")),
-                // create_time小于指定时间
-                Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss")));
-        // 执行查找操作
-        FindIterable<Document> list = simInfoCollection.find(filter);
-        // 限制返回结果数量为10条
-        list.limit(10);
-        // 遍历并输出结果
-        for (Document s : list) {
-            log.info("{}", jsonUtil.objToJson(s));
-        }
-    }
-
-    /**
-     * 测试投影、排序和限制数量的查找
-     * 验证字段投影、排序和限制数量的功能
-     */
-    @Test
-    void testProjections() {
-        // 执行查找操作
-        FindIterable<Document> list = simInfoCollection.find();
-        // 设置字段投影：排除_id字段，只包含sim_iccid和create_time字段
-        list.projection(Projections.fields(
-                Projections.excludeId(), // 排除_id字段
-                Projections.include("sim_iccid", "create_time") // 包含指定字段
-        ));
-        // 按create_time字段降序排序
-        list.sort(Sorts.descending("create_time"));
-        // 限制返回结果数量为10条
-        list.limit(10);
-        // 遍历并输出结果
-        for (Document doc : list) {
-            log.info("{}", jsonUtil.objToJson(doc));
-        }
-    }
-
-    /**
-     * 测试使用游标方式查找
-     * 验证使用游标遍历查询结果的功能
-     */
-    @Test
-    void testFindByCursor() {
-        // 使用try-with-resources确保游标正确关闭
-        try (MongoCursor<Document> cursor = simInfoCollection
-                // 构造时间范围过滤条件
-                .find(Filters.and(
-                        Filters.gt("create_time",
-                                LocalDateTimeUtil.parse("2025-05-09 03:00:00", "yyyy-MM-dd HH:mm:ss")),
-                        Filters.lt("create_time",
-                                LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss"))))
-                // 获取游标
-                .cursor()) {
-            // 遍历游标中的所有文档
-            while (cursor.hasNext()) {
-                // 输出下一个文档
-                log.info("{}", cursor.next().toJson());
-            }
-        }
-    }
-
-    /**
-     * 测试聚合管道操作
-     * 验证使用聚合管道进行复杂查询的功能
-     */
-    @Test
-    void testAggregationWithFilter() {
-        // 创建聚合管道列表
-        List<Bson> pipeline = new ArrayList<>();
-        // 添加匹配阶段：过滤create_time在指定时间范围内的文档
-        pipeline.add(Aggregates.match(Filters.and(
-                Filters.gt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:00:00", "yyyy-MM-dd HH:mm:ss")),
-                Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss")))));
-        // 添加排序阶段：按create_time字段降序排序
-        pipeline.add(Aggregates.sort(Sorts.descending("create_time")));
-        // 添加投影阶段：排除_id字段，包含sim_iccid和create_time字段
-        pipeline.add(Aggregates.project(Projections.fields(
-                Projections.excludeId(), // 排除_id字段
-                Projections.include("sim_iccid", "create_time") // 包含指定字段
-        )));
-        // 添加跳过阶段：跳过0条记录（此处无实际作用，仅作示例）
-        pipeline.add(Aggregates.skip(0));
-        // 添加限制阶段：限制返回结果数量为10条
-        pipeline.add(Aggregates.limit(10));
-
-        // 执行聚合管道并遍历结果
-        for (Document doc : simInfoCollection.aggregate(pipeline)) {
-            log.info("{}", jsonUtil.objToJson(doc));
-        }
-    }
-
-    /**
-     * 测试使用游标方式执行聚合管道
-     * 验证使用游标遍历聚合结果的功能
-     */
-    @Test
-    void testAggregationWithFilterCursor() {
-        // 创建聚合管道列表
-        List<Bson> pipeline = new ArrayList<>();
-        // 添加匹配阶段：过滤create_time在指定时间范围内的文档
-        pipeline.add(Aggregates.match(Filters.and(
-                Filters.gt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:00:00", "yyyy-MM-dd HH:mm:ss")),
-                Filters.lt("create_time", LocalDateTimeUtil.parse("2025-05-09 03:40:00", "yyyy-MM-dd HH:mm:ss")))));
-        // 添加排序阶段：按create_time字段降序排序
-        pipeline.add(Aggregates.sort(Sorts.descending("create_time")));
-        // 添加投影阶段：排除_id字段，包含sim_iccid和create_time字段
-        pipeline.add(Aggregates.project(Projections.fields(
-                Projections.excludeId(), // 排除_id字段
-                Projections.include("sim_iccid", "create_time") // 包含指定字段
-        )));
-
-        // 使用try-with-resources确保游标正确关闭
-        // 执行聚合管道并获取游标
-        try (MongoCursor<Document> cursor = simInfoCollection.aggregate(pipeline).cursor()) {
-            // 遍历游标中的所有文档
-            while (cursor.hasNext()) {
-                // 获取下一个文档
-                Document doc = cursor.next();
-                // 输出文档
-                log.info("{}", jsonUtil.objToJson(doc));
-            }
-        }
-    }
-
-    /**
-     * 测试分组聚合操作
-     * 验证按字段分组并重命名字段的功能
-     */
-    @Test
-    void testGroup() {
-        // 创建聚合管道列表
-        List<Bson> pipeline = new ArrayList<>();
-        // 添加分组阶段：按sim_status字段分组
-        // 在聚合中，MongoDB会将分组字段放在_id字段中
-        pipeline.add(Aggregations.group(MapUtil.of("status", "$sim_status")));
-        // 添加投影阶段：重新组织输出字段
-        pipeline.add(Aggregates.project(Projections.fields(
-                Projections.excludeId(), // 排除_id字段
-                // 使用计算字段将_id.status重命名为"卡状态"
-                // $_id.status表示引用分组结果中_id对象的status字段
-                Projections.computed("卡状态", "$_id.status"))));
-
-        // 执行聚合管道并遍历结果
-        for (Document doc : simInfoCollection.aggregate(pipeline)) {
-            log.info("{}", jsonUtil.objToJson(doc));
-        }
-    }
-
-    /**
-     * 测试复杂分组聚合操作
-     * 验证按字段分组、计数、排序和处理空值的功能
-     */
-    @Test
-    void testGroup2() {
-        // 创建聚合管道列表
-        List<Bson> pipeline = new ArrayList<>();
-        // 添加分组阶段：按device_customer_name字段分组，并统计每组的文档数量
-        pipeline.add(
-                Aggregations.group(MapUtil.of("customerName", "$device_customer_name"),
-                        Accumulators.sum("count", 1)));
-        // 添加排序阶段：先按count降序排序，再按_id.device_customer_name升序排序
-        pipeline.add(Aggregates.sort(Sorts.orderBy(
-                Sorts.descending("count"), // 按count字段降序排序
-                Sorts.ascending("_id.customerName")) // 按_id.device_customer_name字段升序排序
-        ));
-        // 添加投影阶段：重新组织输出字段
-        pipeline.add(Aggregates.project(Projections.fields(
-                Projections.excludeId(), // 排除_id字段
-                // 使用Expressions工具类的ifNull方法处理可能为空的字段
-                // 如果$_id.device_customer_name字段为空，则显示"未添加"
-                Projections.computed("客户名称",
-                        Expressions.ifNull("$_id.customerName", "未添加")),
-                Projections.include("count") // 包含count字段
-        )));
-
-        // 输出聚合管道的JSON表示，便于在MongoDB Shell中调试
-        log.info("[{}] {}", simInfoCollection.getNamespace(), mongoDBUtil.toAggregationsJson(pipeline));
-
-        // 执行聚合管道并遍历结果
-        for (Document doc : simInfoCollection.aggregate(pipeline)) {
-            log.info("{}", jsonUtil.objToJson(doc));
-        }
-    }
-
-    @Test
-    void testGroup3() {
-        List<Bson> pipeline = new ArrayList<>();
-        pipeline.add(Aggregates.match(Filters.and(
-                Filters.gt("gps_time", LocalDateTimeUtil.parse("2024-01-01 03:00:00", "yyyy-MM-dd HH:mm:ss")),
-                Filters.lt("gps_time", LocalDateTimeUtil.parse("2025-02-01 03:40:00", "yyyy-MM-dd HH:mm:ss")))));
-        pipeline.add(
-                Aggregations.group(MapUtil.of("did", "$did"),
-                        Accumulators.sum("count", 1)));
-        pipeline.add(Aggregates.sort(Sorts.orderBy(
-                Sorts.descending("count"), // 按count字段降序排序
-                Sorts.ascending("_id.did")) // 按_id.device_customer_name字段升序排序
-        ));
-        pipeline.add(Aggregates.project(Projections.fields(
-                Projections.excludeId(), // 排除_id字段
-                Projections.computed("设备号",
-                        Expressions.ifNull("$_id.did", "无")),
-                Projections.include("count") // 包含count字段
-        )));
-        log.info("[{}] {}", vcCollection.getNamespace(), mongoDBUtil.toAggregationsJson(pipeline));
-        for (Document doc : vcCollection.aggregate(pipeline)) {
-            log.info("{}", jsonUtil.objToJson(doc));
-        }
-    }
-
-    /**
-     * 测试计数操作
-     * 验证统计满足条件的文档数量的功能
-     */
-    @Test
-    void testCount() {
-        // 统计sim_plan字段不存在或为null的文档数量
-        long total = simInfoCollection.countDocuments(Filters.or(
-                // sim_plan字段不存在
-                Filters.not(Filters.exists("sim_plan")),
-                // sim_plan字段为null
-                Filters.eq("sim_plan", null)));
-        log.info("total: {}", total);
-    }
-
-    /**
-     * 测试使用聚合管道计数
-     * 验证使用聚合管道统计满足条件的文档数量的功能
-     */
-    @Test
-    void testCountByAggregate() {
-        // 创建聚合管道列表
-        List<Bson> pipeline = new ArrayList<>();
-        // 添加匹配阶段：过滤sim_plan字段不存在或为null的文档
-        pipeline.add(Aggregates.match(Filters.or(
-                Filters.not(Filters.exists("sim_plan")), // sim_plan字段不存在
-                Filters.eq("sim_plan", null) // sim_plan字段为null
-        )));
-        // 添加计数阶段：统计匹配的文档数量
-        pipeline.add(Aggregates.count("count"));
-        // 添加投影阶段：排除_id字段
-        pipeline.add(Aggregates.project(Projections.fields(
-                Projections.excludeId() // 排除_id字段
-        )));
-        // 执行聚合管道并获取第一条结果
-        Document result = simInfoCollection.aggregate(pipeline).first();
-        // 如果有结果则输出计数，否则输出0
-        if (result != null) {
-            log.info("total: {}", result.values().iterator().next());
+    void 读取一个文档2() {
+        log.info("读取一个文档");
+        SimInfo simInfo = mongoDBUtil.findFirst(SimInfo.class, new MongoQuery(simInfoCollection));
+        if (simInfo != null) {
+            log.info("转换后的SimInfo对象: {}", simInfo);
+            log.info("转换后的SimInfo对象JSON: {}", JSONUtil.toJsonStr(simInfo, jsonConfig));
+            log.info("ICCID: {}", simInfo.getSimIccid());
+            log.info("手机号: {}", simInfo.getSimMsisdn());
+            log.info("设备ID: {}", simInfo.getDeviceId());
+            log.info("创建时间: {}", simInfo.getCreateTime());
+            log.info("更新时间: {}", simInfo.getUpdateTime());
         } else {
-            log.info("total: 0");
+            log.info("没有找到文档");
         }
+    }
+
+    @Test
+    void 分页查询() {
+        int page = 1;
+        int pageSize = 10;
+        List<SimInfo> simInfos = mongoDBUtil.find(SimInfo.class, new MongoQuery(simInfoCollection).setPage(page, pageSize));
+        for (SimInfo simInfo : simInfos) {
+            log.info("{}", JSONUtil.toJsonStr(simInfo, jsonConfig));
+        }
+    }
+
+    @Test
+    void 多条件查询() {
+        int page = 1;
+        int pageSize = 10;
+        Bson projection = Projections.excludeId();
+        Bson sort = Sorts.orderBy(Sorts.descending("update_time"));
+        Bson filter = Filters.empty();
+
+        List<SimInfo> simInfos = mongoDBUtil.find(SimInfo.class,
+                new MongoQuery(simInfoCollection)
+                        .setFilter(filter).setProjection(projection).setSort(sort).setPage(page, pageSize));
+        for (SimInfo simInfo : simInfos) {
+            log.info("{}", JSONUtil.toJsonStr(simInfo, jsonConfig));
+        }
+
+        long total = mongoDBUtil.count(new MongoQuery(simInfoCollection).setFilter(filter));
+        log.info("{}", total);
+    }
+
+    @Test
+    void 限制返回列() {
+        SimInfo simInfo = mongoDBUtil.findFirst(SimInfo.class, new MongoQuery(simInfoCollection).setProjection(
+                Projections.fields(Projections.include("sim_msisdn", "sim_status")))
+        );
+        log.info("{}", JSONUtil.toJsonStr(simInfo, jsonConfig));
     }
 
     /**
-     * 测试统计所有文档数量
-     * 验证统计集合中文档总数的功能
+     * 分组SIM卡状态和数量
      */
     @Test
-    void testCountAll() {
-        // 统计集合中所有文档的数量
-        long total = simInfoCollection.countDocuments();
-        log.info("total: {}", total);
-    }
-
-    /**
-     * 插入一个文档
-     */
-    @Test
-    void testInsertOne() {
-        Map<String, Object> m = new HashMap<>();
-        InsertOneResult insertOneResult = mongoDBUtil.insertOne(simInfoCollection, m);
-        log.info("{}", insertOneResult);
-    }
-
-    @Test
-    void testUpdate() {
-        Bson filter = Filters.eq("sim_iccid", "2");
-        Document simIccid = simInfoCollection.find(filter).first();
-        log.info("{}", jsonUtil.objToJson(simIccid));
-        if (simIccid != null) {
-            UpdateResult updateResult = mongoDBUtil.saveOrUpdate(simInfoCollection, filter, new HashMap<String, Object>() {{
-                put("sim_msisdn", "2");
-            }});
-            log.info("{}", updateResult);
-        }
-    }
-
-    LocalDateTime getLocalDateTime(Object value) {
-        String v = Convert.toStr(value, null);
-        if (StrUtil.isNotBlank(v)) {
-            v = v.trim();
-            for (String dateFormat : dateFormats) {
-                try {
-                    return LocalDateTimeUtil.parse(v, dateFormat);
-                } catch (Exception e) {
-                }
-            }
-            throw new RuntimeException("日期格式错误：" + v);
-        }
-        return null;
-    }
-
-    @Test
-    void 数据排查() {
-        try (ExcelReader reader = ExcelReader.read(Paths.get("D:/tmp/发货记录汇总/2025年合 - 终版.xlsx"))) {
-            reader.sheet(0).header(1).rows().map(Row::toMap).forEach(row -> {
-                String sim_iccid = Convert.toStr(row.get("ICCID(不可重复)"), null);
-                String sim_msisdn = Convert.toStr(row.get("SIM卡号(不可重复)"), null);
-                String device_id = Convert.toStr(row.get("终端编号（必填）"), null);
-                String device_working_condition_id = Convert.toStr(row.get("工况ID(不可重复)"), null);
-                String device_imei = Convert.toStr(row.get("IMEI(不可重复)"), null);
-                LocalDateTime device_shipping_time = getLocalDateTime(row.get("发货时间(必填)"));
-                String device_customer_name = Convert.toStr(row.get("客户名称(必填)"), null);
-                String device_model = Convert.toStr("终端型号", null);
-                String device_type = Convert.toStr("终端类型", null);
-                LocalDateTime service_expiration_time = getLocalDateTime(row.get("服务到期时间"));
-                String device_logistics_no = Convert.toStr(row.get("物流单号"), null);
-                Document simInfo = null;
-                long count;
-                if (StrUtil.isNotBlank(sim_iccid)) {
-                    sim_iccid = sim_iccid.trim();
-                    if (sim_iccid.length() != 19 && sim_iccid.length() != 20) {
-                        log.error("sim_iccid {} 长度错误", sim_iccid);
-                        return;
-                    }
-                    Bson filter = Filters.eq("sim_iccid", sim_iccid.trim());
-                    count = simInfoCollection.countDocuments(filter);
-                    if (count == 0) {
-                        //log.warn("找不到 sim_iccid {}，准备新增", sim_iccid);
-                        simInfo = new Document();
-                        simInfo.put("sim_iccid", sim_iccid.trim());
-                    } else {
-                        simInfo = simInfoCollection.find(filter).first();
-                        //log.debug("通过sim_iccid找到了 {}", simInfo);
-                    }
-                }
-                if (simInfo == null && StrUtil.isNotBlank(sim_msisdn)) {
-                    sim_msisdn = sim_msisdn.trim();
-                    Bson filter = Filters.eq("sim_msisdn", sim_msisdn.trim());
-                    count = simInfoCollection.countDocuments(filter);
-                    if (count == 0) {
-                        log.error("找不到 sim_msisdn {}", sim_msisdn);
-                        return;
-                    } else if (count > 1) {
-                        log.error("sim_msisdn {} 重复", sim_msisdn);
-                        return;
-                    }
-                    simInfo = simInfoCollection.find(filter).first();
-                    //log.debug("通过sim_msisdn找到了 {}", simInfo);
-                }
-                if (simInfo == null) {
-                    log.error("输入参数错误 sim_iccid {} sim_msisdn {} device_id {} device_imei {} device_working_condition_id {}", sim_iccid, sim_msisdn, device_id, device_imei, device_working_condition_id);
-                    return;
-                }
-            });
-        } catch (IOException ex) {
-            log.error(ex.getMessage());
-        }
-        log.info("done");
-    }
-
-    @Test
-    void 刷写数据() {
-        try (ExcelReader reader = ExcelReader.read(Paths.get("D:/tmp/发货记录汇总/2025年合 - 终版.xlsx"))) {
-            reader.sheet(0).header(1).rows().map(Row::toMap).forEach(row -> {
-                log.debug("准备处理 {}", row);
-                String sim_iccid = Convert.toStr(row.get("ICCID(不可重复)"), null);
-                String sim_msisdn = Convert.toStr(row.get("SIM卡号(不可重复)"), null);
-                String device_id = Convert.toStr(row.get("终端编号（必填）"), null);
-                String device_working_condition_id = Convert.toStr(row.get("工况ID(不可重复)"), null);
-                String device_imei = Convert.toStr(row.get("IMEI(不可重复)"), null);
-                LocalDateTime device_shipping_time = getLocalDateTime(row.get("发货时间(必填)"));
-                String device_customer_name = Convert.toStr(row.get("客户名称(必填)"), null);
-                String device_model = Convert.toStr("终端型号", null);
-                String device_type = Convert.toStr("终端类型", null);
-                LocalDateTime service_expiration_time = getLocalDateTime(row.get("服务到期时间"));
-                String device_logistics_no = Convert.toStr(row.get("物流单号"), null);
-                Document simInfo = null;
-                long count;
-                if (StrUtil.isNotBlank(sim_iccid)) {
-                    sim_iccid = sim_iccid.trim();
-                    if (sim_iccid.length() != 19 && sim_iccid.length() != 20) {
-                        log.error("sim_iccid {} 长度错误", sim_iccid);
-                        return;
-                    }
-                    Bson filter = Filters.eq("sim_iccid", sim_iccid);
-                    count = simInfoCollection.countDocuments(filter);
-                    if (count == 0) {
-                        log.warn("找不到 sim_iccid {}，准备新增", sim_iccid);
-                        simInfo = new Document();
-                        simInfo.put("sim_iccid", sim_iccid);
-                    } else {
-                        simInfo = simInfoCollection.find(filter).first();
-                        log.debug("通过sim_iccid找到了 {}", simInfo);
-                    }
-                }
-                if (simInfo == null && StrUtil.isNotBlank(sim_msisdn)) {
-                    sim_msisdn = sim_msisdn.trim();
-                    Bson filter = Filters.eq("sim_msisdn", sim_msisdn);
-                    count = simInfoCollection.countDocuments(filter);
-                    if (count == 0) {
-                        log.error("找不到 sim_msisdn {}", sim_msisdn);
-                        return;
-                    } else if (count > 1) {
-                        log.error("sim_msisdn {} 重复", sim_msisdn);
-                        return;
-                    }
-                    simInfo = simInfoCollection.find(filter).first();
-                    log.debug("通过sim_msisdn找到了 {}", simInfo);
-                }
-                if (simInfo == null) {
-                    log.error("输入参数错误 sim_iccid {} sim_msisdn {} device_id {} device_imei {} device_working_condition_id {}", sim_iccid, sim_msisdn, device_id, device_imei, device_working_condition_id);
-                    return;
-                }
-
-                Map<String, Object> map = new HashMap<>();
-                if (!simInfo.containsKey("sim_msisdn") && StrUtil.isNotBlank(sim_msisdn)) {
-                    map.put("sim_msisdn", sim_msisdn.trim());
-                }
-                if (!simInfo.containsKey("device_id") && StrUtil.isNotBlank(device_id)) {
-                    map.put("device_id", device_id.trim());
-                }
-                if (!simInfo.containsKey("device_working_condition_id") && StrUtil.isNotBlank(device_working_condition_id)) {
-                    map.put("device_working_condition_id", device_working_condition_id.trim());
-                }
-                if (!simInfo.containsKey("device_imei") && StrUtil.isNotBlank(device_imei)) {
-                    map.put("device_imei", device_imei.trim());
-                }
-                if (!simInfo.containsKey("device_shipping_time") && device_shipping_time != null) {
-                    map.put("device_shipping_time", device_shipping_time);
-                }
-                if (!simInfo.containsKey("device_customer_name") && StrUtil.isNotBlank(device_customer_name)) {
-                    map.put("device_customer_name", device_customer_name.trim());
-                }
-                if (!simInfo.containsKey("device_model") && StrUtil.isNotBlank(device_model)) {
-                    map.put("device_model", device_model.trim());
-                }
-                if (!simInfo.containsKey("device_type") && StrUtil.isNotBlank(device_type)) {
-                    map.put("device_type", device_type.trim());
-                }
-                if (!simInfo.containsKey("service_expiration_time") && service_expiration_time != null) {
-                    map.put("service_expiration_time", service_expiration_time);
-                }
-                if (!simInfo.containsKey("device_logistics_no") && StrUtil.isNotBlank(device_logistics_no)) {
-                    map.put("device_logistics_no", device_logistics_no.trim());
-                }
-                if (MapUtil.isNotEmpty(map)) {
-                    UpdateResult updateResult = mongoDBUtil.saveOrUpdate(simInfoCollection, Filters.eq("sim_iccid", simInfo.getString("sim_iccid")), map);
-                    log.debug("更新结果 {}", updateResult);
-                }
-            });
-        } catch (IOException ex) {
-            log.error(ex.getMessage());
-        }
-        log.info("done");
-    }
-
-
-    void 查询天盛泰丰卡状态(Document simInfo) {
-        String url = "http://47.104.243.180:12000/api/card/card/list?pageNum=1&pageSize=10&cardNo=" + simInfo.getString("sim_iccid");
-        HttpRequest get = HttpUtil.createGet(url);
-        get.header("Authorization", "Bearer eyJhbGciOiJIUzUxMiJ9.eyJsb2dpbl91c2VyX2tleSI6IjZmMGIxODkxLTQ3OTUtNDY0OS1hZTg2LTU2NWY4Nzc2MTM2YiJ9.1rC86ubyuHWGbb_MKmuwYMVB2XYLVxZK85cNR5bzyO6VL8V6hRQ26nyHBF5N1B-WxT3H81KRSIZXWjWMKOpZgg");
-        HttpResponse response = get.execute();
-        log.debug("response {}", response.body());
-        JsonNode jsonNode = jsonUtil.readTree(response.body());
-        log.debug("激活时间 {}", jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/activeTime").textValue());
-        log.debug("开卡时间 {}", jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/openTime").textValue());
-        // 1：待激活 2：已激活 4：停机 6：可测试 7：库存 8：预销户
-        String status = jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/status").textValue();
-        String statusName;
-        switch (status) {
-            case "1":
-                statusName = "待激活";
-                break;
-            case "2":
-                statusName = "已激活";
-                break;
-            case "4":
-                statusName = "停机";
-                break;
-            case "6":
-                statusName = "可测试";
-                break;
-            case "7":
-                statusName = "库存";
-                break;
-            case "8":
-                statusName = "预销户";
-                break;
-            default:
-                statusName = "未知";
-                break;
-        }
-        log.debug("状态 {} {}", status, statusName);
-        Map<String, Object> map = new HashMap<>();
-        map.put("sim_msisdn", simInfo.getString("sim_msisdn"));
-        map.put("sim_activation_time", getLocalDateTime(jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/activeTime").textValue()));
-        map.put("sim_purchase_time", getLocalDateTime(jsonUtil.getJsonNodeByJsonPtrExpr(jsonNode, "/rows/0/openTime").textValue()));
-        map.put("sim_status_raw", simInfo.getString("sim_status"));
-        map.put("sim_status", simInfo.getString("sim_status"));
-        map.put("api_type", "天盛泰丰");
-        if (MapUtil.isNotEmpty(map)) {
-            UpdateResult updateResult = mongoDBUtil.saveOrUpdate(simInfoCollection, Filters.eq("sim_iccid", simInfo.getString("sim_iccid")), map);
-            log.debug("更新结果 {}", updateResult);
-        }
-    }
-
-    @Test
-    void 更新天盛泰丰卡状态() {
-        try (ExcelReader reader = ExcelReader.read(Paths.get("D:/tmp/card_1768205410152.xlsx"))) {
-            reader.sheet(0).header(1).rows().map(Row::toMap).forEach(row -> {
-                String sim_iccid = row.get("iccid").toString();
-                String sim_msisdn = row.get("msisdn").toString();
-                String sim_status_raw = row.get("卡状态").toString();
-                String sim_status = sim_status_raw;
-                log.debug("sim_iccid {} sim_msisdn {} sim_status_raw {} sim_status {}", sim_iccid, sim_msisdn, sim_status_raw, sim_status);
-                Document simInfo;
-                Bson filter = Filters.eq("sim_iccid", sim_iccid);
-                long count = simInfoCollection.countDocuments(filter);
-                if (count == 0) {
-                    log.warn("找不到 sim_iccid {}，准备新增", sim_iccid);
-                    simInfo = new Document();
-                    simInfo.put("sim_iccid", sim_iccid);
-                } else {
-                    simInfo = simInfoCollection.find(filter).first();
-                    log.debug("通过sim_iccid找到了 {}", simInfo);
-                }
-                if (StrUtil.isNotBlank(sim_msisdn)) {
-                    simInfo.put("sim_msisdn", sim_msisdn.trim());
-                }
-                if (StrUtil.isNotBlank(sim_status_raw)) {
-                    simInfo.put("sim_status_raw", sim_status_raw.trim());
-                    simInfo.put("sim_status", sim_status.trim());
-                }
-                查询天盛泰丰卡状态(simInfo);
-            });
-        } catch (IOException ex) {
-            log.error(ex.getMessage());
-        }
-        log.info("done");
-    }
-
-    @Test
-    void 统计不要的列() {
-        Bson filter = Filters.or(
-                Filters.exists("device_display_id"),
-                Filters.exists("device_base_id")
-        );
-        long count = simInfoCollection.countDocuments(filter);
-        log.info("有 {} 条数据有 device_display_id 或 device_base_id 字段", count);
-    }
-
-    @Test
-    void 查询不要的列() {
-        Bson filter = Filters.or(
-                Filters.exists("device_display_id"),
-                Filters.exists("device_base_id")
-        );
-        Document first = simInfoCollection.find(filter).first();
-        log.debug("{}", first.toJson());
-    }
-
-    @Test
-    void 删除不要的列() {
-        // device_display_id
-        // device_base_id
-        // 查询有这两列的数据，然后删除这两列，但是保持其他列信息
-        Bson filter = Filters.or(
-                Filters.exists("device_display_id"),
-                Filters.exists("device_base_id")
+    void 分组SIM卡状态和数量() {
+        List<Bson> pipeline = Arrays.asList(
+                Aggregates.group("$sim_status", Accumulators.sum("count", 1)),
+                // 添加投影阶段，将_id重命名为status
+                Aggregates.project(
+                        Projections.fields(
+                                Projections.excludeId(),
+                                Projections.computed("status", "$_id"),
+                                Projections.include("count")
+                        )
+                ),
+                Aggregates.sort(Sorts.descending("count"))
         );
 
-        // 使用游标流式处理，避免内存溢出
-        try (MongoCursor<Document> cursor = simInfoCollection.find(filter).iterator()) {
-            int processedCount = 0;
-            int updatedCount = 0;
-
+        // 执行聚合查询
+        try (MongoCursor<Document> cursor = simInfoCollection.aggregate(pipeline).iterator();) {
             while (cursor.hasNext()) {
                 Document doc = cursor.next();
-                log.debug("{}", doc.toJson());
-                String simIccid = doc.getString("sim_iccid");
-
-                if (StrUtil.isNotBlank(simIccid)) {
-                    // 构建只删除指定字段的更新操作
-                    Bson update = Updates.combine(
-                            Updates.unset("device_display_id"),
-                            Updates.unset("device_base_id")
-                    );
-                    Bson docFilter = Filters.eq("sim_iccid", simIccid);
-
-                    UpdateResult result = simInfoCollection.updateOne(docFilter, update);
-                    if (result.getModifiedCount() > 0) {
-                        updatedCount++;
-                        log.debug("已删除 sim_iccid={} 的 device_display_id 和 device_base_id 字段", simIccid);
-                    }
-                }
-
-                processedCount++;
-                if (processedCount % 1000 == 0) {
-                    log.info("已处理 {} 条数据，已更新 {} 条数据", processedCount, updatedCount);
-                }
+                log.info("状态: {}, 数量: {}", doc.get("status"), doc.get("count"));
             }
+        }
+    }
 
-            log.info("处理完成：共处理 {} 条数据，更新 {} 条数据", processedCount, updatedCount);
-        } catch (Exception e) {
-            log.error("处理过程中出错", e);
+    @Test
+    void 分组SIM卡状态和数量2() {
+        MongoQuery mongoQuery = new MongoQuery(simInfoCollection)
+                .setGroupField("sim_status").setTotalName("count")
+                .setSort(Sorts.descending("count"))
+                .setPage(1, 5);
+        List<Document> results = mongoDBUtil.group(mongoQuery);
+        for (Document result : results) {
+            log.info("{}", result.toJson());
+        }
+        long total = mongoDBUtil.count(mongoQuery);
+        log.info("{}", total);
+    }
+
+    @Test
+    void 测试时间() {
+        LocalDateTime t = LocalDateTimeUtil.parse("2025-11-02T12:13:14");
+        // 获取月份第一天的0点0分0秒
+        LocalDateTime a = t.withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0).withNano(0);
+        // 获取月份最后一天的23点59分59秒999毫秒
+        int lastDayOfMonth = t.getMonth().length(t.toLocalDate().isLeapYear());
+        LocalDateTime b = t.withDayOfMonth(lastDayOfMonth)
+                .withHour(23).withMinute(59).withSecond(59).withNano(999999999);
+        log.info("{}", a);
+        log.info("{}", b);
+    }
+
+    @Test
+    void traffic_info链接sim_info() {
+        LocalDateTime a = LocalDateTimeUtil.parse("2025-12-01T00:00:00");
+        LocalDateTime b = LocalDateTimeUtil.parse("2026-01-01T00:00:00");
+//        LocalDateTime a = LocalDateTimeUtil.parse("2020-12-01T00:00:00");
+//        LocalDateTime b = LocalDateTimeUtil.parse("2021-01-01T00:00:00");
+        List<Bson> pipeline = Arrays.asList(
+                // 匹配时间范围条件
+                Aggregates.match(Filters.and(
+                        Filters.gte("traffic_time", a),
+                        Filters.lt("traffic_time", b)
+                )),
+                // 按billed_volume字段降序排序
+                Aggregates.sort(Sorts.descending("billed_volume")),
+                // 使用带有pipeline的lookup连接两个集合
+                Aggregates.lookup(
+                        "sim_info", // 连接的外部集合名称
+                        Arrays.asList(
+                                // 在lookup内部进行过滤
+                                Aggregates.match(
+                                        Filters.and(
+                                                Filters.expr(Filters.eq("sim_iccid", "$sim_iccid"))// 使用$expr引用主文档的sim_iccid字段
+                                        )
+                                ),
+                                // 投影，排除不需要的字段
+                                Aggregates.project(Projections.fields(
+                                        Projections.excludeId(),
+                                        Projections.exclude("create_time", "update_time")
+                                )),
+                                // 限制每个sim_iccid只返回一条记录
+                                Aggregates.limit(1)
+                        ),
+                        "sim_info_datas" // 连接结果存储在主文档中的字段名
+                ),
+                // 使用$mergeObjects和$first替换根文档，将sim_info的字段合并到主文档
+                Aggregates.replaceWith(
+                        // 创建$mergeObjects操作，用于合并多个文档
+                        new Document(
+                                "$mergeObjects", // MongoDB聚合操作符：合并多个文档
+                                // 要合并的文档列表
+                                Arrays.asList(
+                                        "$$ROOT", // 表示当前文档（主文档）
+                                        // 创建$first操作，用于获取数组中的第一个元素
+                                        new Document(
+                                                "$first", // MongoDB聚合操作符：获取数组第一个元素
+                                                "$sim_info_datas" // 从sim_info_datas字段（数组）中获取第一个元素
+                                        )
+                                )
+                        )
+                ),
+                // 投影，排除不需要的字段
+                Aggregates.project(Projections.fields(
+                        Projections.excludeId(),
+                        Projections.exclude("sim_info_datas")
+                )),
+                // 跳过前0条记录
+                Aggregates.skip(0),
+                // 限制返回结果数量为10个
+                Aggregates.limit(10)
+        );
+        log.info("{}", mongoDBUtil.toAggregationsJson(pipeline));
+        try (MongoCursor<Document> cursor = trafficInfoCollection.aggregate(pipeline).iterator();) {
+            while (cursor.hasNext()) {
+                Document doc = cursor.next();
+                log.info("{}", doc.toJson());
+            }
+        }
+    }
+
+    @Test
+    void sim_info链接traffic_info() {
+        LocalDateTime a = LocalDateTimeUtil.parse("2025-12-01T00:00:00");
+        LocalDateTime b = LocalDateTimeUtil.parse("2026-01-01T00:00:00");
+//        LocalDateTime a = LocalDateTimeUtil.parse("2020-12-01T00:00:00");
+//        LocalDateTime b = LocalDateTimeUtil.parse("2021-01-01T00:00:00");
+
+        // 使用sim_info中的sim_iccid链接traffic_info中的sim_iccid
+        List<Bson> pipeline = Arrays.asList(
+                // 空的match条件，返回所有文档
+                Aggregates.match(Filters.empty()),
+                // 按update_time字段降序排序
+                Aggregates.sort(Sorts.descending("update_time")),
+                // 使用带有pipeline的lookup连接两个集合（左连接）
+                Aggregates.lookup(
+                        "traffic_info",// 连接的外部集合名称
+                        Arrays.asList(
+                                // 在lookup内部进行过滤
+                                Aggregates.match(Filters.and(
+                                        Filters.gte("traffic_time", a),
+                                        Filters.lt("traffic_time", b),
+                                        Filters.expr(Filters.eq("sim_iccid", "$sim_iccid")) // 使用$expr引用外部字段
+                                )),
+                                // 投影，排除不需要的字段
+                                Aggregates.project(Projections.fields(
+                                        Projections.excludeId(),
+                                        Projections.exclude("create_time", "update_time")
+                                )),
+                                // 限制每个sim_iccid只返回一条记录
+                                Aggregates.limit(1)
+                        ),
+                        "traffic_info_datas" // 连接结果存储在主文档中的字段名
+                ),
+                // 添加match条件，过滤掉traffic_info_datas数组为空的文档，实现内连接效果
+                Aggregates.match(Filters.expr(new Document("$gt", Arrays.asList(new Document("$size", "$traffic_info_datas"), 0)))),
+                // 使用$mergeObjects和$first替换根文档，将traffic_info的字段合并到主文档
+                Aggregates.replaceWith(
+                        // 创建$mergeObjects操作，用于合并多个文档
+                        new Document(
+                                "$mergeObjects", // MongoDB聚合操作符：合并多个文档
+                                // 要合并的文档列表
+                                Arrays.asList(
+                                        "$$ROOT", // 表示当前文档（主文档）
+                                        // 创建$first操作，用于获取数组中的第一个元素
+                                        new Document(
+                                                "$first", // MongoDB聚合操作符：获取数组第一个元素
+                                                "$traffic_info_datas" // 从traffic_info_datas字段（数组）中获取第一个元素
+                                        )
+                                )
+                        )
+                ),
+                // 投影，排除不需要的字段
+                Aggregates.project(Projections.fields(
+                        Projections.excludeId(),
+                        Projections.exclude("traffic_info_datas")
+                )),
+                // 跳过0条记录
+                Aggregates.skip(0),
+                // 限制返回结果数量为10个
+                Aggregates.limit(10)
+        );
+        log.info("{}", mongoDBUtil.toAggregationsJson(pipeline));
+        try (MongoCursor<Document> cursor = simInfoCollection.aggregate(pipeline).iterator();) {
+            while (cursor.hasNext()) {
+                Document doc = cursor.next();
+                log.info("{}", doc.toJson());
+            }
         }
     }
 
