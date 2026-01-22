@@ -19,10 +19,14 @@ import org.bson.conversions.Bson;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.ttzero.excel.entity.ListSheet;
+import org.ttzero.excel.entity.Workbook;
 import sunyu.util.MongoDBUtil;
 import sunyu.util.query.MongoQuery;
 import sunyu.util.test.entity.SimInfo;
 
+import java.io.IOException;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -552,6 +556,49 @@ public class MongoDBUtilTests {
     void 测试delete() {
         DeleteResult deleteResult = mongoDBUtil.delete(testCollection, Filters.eq("sim_iccid", "iccid1234567892"));
         log.info("{}", deleteResult);
+    }
+
+    @Test
+    void 导出某月卡流量信息() throws IOException {
+        new Workbook()
+                .bestSpeed() // <- 性能模式
+                .addSheet(new ListSheet<Document>() {
+                    private int pageNo = 37, limit = 10000;
+
+                    @Override
+                    protected List<Document> more() {
+                        LocalDateTime a = LocalDateTimeUtil.parse("2025-01-01T00:00:00");
+                        LocalDateTime b = LocalDateTimeUtil.parse("2025-02-01T00:00:00");
+                        List<Document> documents = mongoDBUtil.leftOuterJoin(new MongoQuery(trafficInfoCollection)
+                                // 左表过滤
+                                .setFilter(Filters.and(
+                                        Filters.gte("traffic_time", a),
+                                        Filters.lt("traffic_time", b),
+                                        Filters.or(
+                                                Filters.gt("traffic_volume", 0),
+                                                Filters.gt("billed_volume", 0)
+                                        )
+                                ))
+                                // 左外连接
+                                .setRightCollectionName("sim_info")
+                                // 关联字段
+                                .setLeftJoinField("sim_iccid").setRightJoinField("sim_iccid")
+                                // 右表字段过滤
+                                .setRightProjection(Projections.fields(
+                                        Projections.excludeId(),
+                                        Projections.exclude("create_time", "update_time")
+                                ))
+                                // 是否将右表第一条内容合并到左表中
+                                .setMergeRightObjectsToLeft(true)
+                                // 左表翻页
+                                //.setPage(++pageNo, limit)
+                                .setPage(++pageNo, limit)
+                                // 返回左表字段
+                                .setProjection(Projections.excludeId())
+                        );
+                        return documents;
+                    }
+                }).writeTo(Paths.get("d:/tmp/excel"));
     }
 
 }

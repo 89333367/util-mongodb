@@ -476,7 +476,7 @@ public class MongoDBUtil implements AutoCloseable {
             pipeline.add(Aggregates.group(groupDocument));
             pipeline.add(Aggregates.count("__totalGroups"));
 
-            log.debug("Aggregation Pipeline: {}", toAggregationsJson(pipeline));
+            log.debug("Aggregation Pipeline {}: {}", mongoQuery.getCollection().getNamespace(), toAggregationsJson(pipeline));
 
             Document result = mongoQuery.getCollection().aggregate(pipeline).first();
             if (result != null) {
@@ -606,7 +606,7 @@ public class MongoDBUtil implements AutoCloseable {
             pipeline.add(Aggregates.limit(mongoQuery.getLimit()));
         }
 
-        log.debug("Aggregation Pipeline: {}", toAggregationsJson(pipeline));
+        log.debug("Aggregation Pipeline {}: {}", mongoQuery.getCollection().getNamespace(), toAggregationsJson(pipeline));
 
         // 查询
         List<Document> results = new ArrayList<>();
@@ -698,7 +698,7 @@ public class MongoDBUtil implements AutoCloseable {
             pipeline.add(Aggregates.limit(mongoQuery.getLimit()));
         }
 
-        log.debug("Aggregation Pipeline: {}", toAggregationsJson(pipeline));
+        log.debug("Aggregation Pipeline {}: {}", mongoQuery.getCollection().getNamespace(), toAggregationsJson(pipeline));
 
         // 查询
         List<Document> results = new ArrayList<>();
