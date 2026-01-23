@@ -295,6 +295,10 @@ public class MongoDBUtil implements AutoCloseable {
 
         // 设置数据字段（使用$set操作符）
         document.forEach((key, value) -> {
+            if (key.equals(config.CREATE_TIME) || key.equals(config.UPDATE_TIME)) {
+                // 这两个值在上面已经设置过了，这里不重复设置
+                return;
+            }
             if (Convert.toBool(forceUpdate, false)) {
                 // value是不是为空，都要更新到数据库
                 updates.add(Updates.set(key, value));
@@ -334,6 +338,10 @@ public class MongoDBUtil implements AutoCloseable {
         // 设置数据字段（使用$set操作符）
         if (MapUtil.isNotEmpty(data)) {
             data.forEach((key, value) -> {
+                if (key.equals(config.CREATE_TIME) || key.equals(config.UPDATE_TIME)) {
+                    // 这两个值在上面已经设置过了，这里不重复设置
+                    return;
+                }
                 if (Convert.toBool(forceUpdate, false)) {
                     // value是不是为空，都要更新到数据库
                     updates.add(Updates.set(key, value));

@@ -1,6 +1,7 @@
 package sunyu.util.test;
 
 import cn.hutool.core.date.LocalDateTimeUtil;
+import cn.hutool.core.io.FileUtil;
 import cn.hutool.json.JSONConfig;
 import cn.hutool.json.JSONUtil;
 import cn.hutool.log.Log;
@@ -23,6 +24,7 @@ import org.ttzero.excel.entity.ListSheet;
 import org.ttzero.excel.entity.Workbook;
 import sunyu.util.MongoDBUtil;
 import sunyu.util.query.MongoQuery;
+import sunyu.util.test.config.ConfigProperties;
 import sunyu.util.test.entity.SimInfo;
 
 import java.io.IOException;
@@ -599,6 +601,23 @@ public class MongoDBUtilTests {
                         return documents;
                     }
                 }).writeTo(Paths.get("d:/tmp/excel"));
+    }
+
+    @Test
+    void 销卡() {
+        LocalDateTime t = LocalDateTimeUtil.parse("2026-01-23", "yyyy-MM-dd");
+        for (String iccid : FileUtil.readUtf8Lines("d:/tmp/销卡.txt")) {
+            log.info("{}", iccid);
+            SimInfo simInfo = mongoDBUtil.findFirst(SimInfo.class, new MongoQuery(simInfoCollection)
+                    .setFilter(Filters.eq("sim_iccid", iccid))
+            );
+            if (simInfo != null) {
+                simInfo.setSimStatus("已销卡");
+                simInfo.setSimDeactivationPeriod(t);
+                UpdateResult result = mongoDBUtil.saveOrUpdateEntity(simInfoCollection, Filters.eq("sim_iccid", iccid), simInfo);
+                log.info("{}", result);
+            }
+        }
     }
 
 }

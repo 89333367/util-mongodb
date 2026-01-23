@@ -1,4 +1,4 @@
-package sunyu.util.test;
+package sunyu.util.test.config;
 
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.log.Log;
