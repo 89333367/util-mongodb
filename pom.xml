@@ -36,6 +36,7 @@
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
             <version>5.8.43</version>
+            <optional>true</optional>
         </dependency>
         <!-- https://central.sonatype.com/artifact/org.mongodb/mongodb-driver-core/versions -->
         <dependency>
@@ -110,35 +111,58 @@
                         <configuration>
                             <!-- 禁用 dependency-reduced-pom.xml 文件生成 -->
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <!-- 重命名包：批量给第三方包加统一前缀 -->
                             <relocations>
-                                <!-- 重命名Hutool包 -->
                                 <relocation>
-                                    <pattern>cn.hutool</pattern>
-                                    <shadedPattern>sunyu.util.relocations.mongodb.cn.hutool</shadedPattern>
-                                </relocation>
-                                <!-- 重命名Apache包 -->
-                                <relocation>
-                                    <pattern>org.apache</pattern>
-                                    <shadedPattern>sunyu.util.relocations.mongodb.org.apache</shadedPattern>
-                                </relocation>
-                                <!-- 重命名Jackson包 -->
-                                <relocation>
-                                    <pattern>com.fasterxml</pattern>
-                                    <shadedPattern>sunyu.util.relocations.mongodb.com.fasterxml</shadedPattern>
-                                </relocation>
-                                <!-- 重命名Guava包 -->
-                                <relocation>
-                                    <pattern>com.google</pattern>
-                                    <shadedPattern>sunyu.util.relocations.mongodb.com.google</shadedPattern>
+                                    <!-- 基础匹配（这里用空或通配思路，核心靠includes限定） -->
+                                    <pattern></pattern>
+                                    <!-- 统一前缀：所有匹配的包都会被加到这个路径下 -->
+                                    <shadedPattern>relocations.${project.groupId}.</shadedPattern>
+                                    <!-- 重命名包 -->
+                                    <includes>
+                                        <include>org.apache.**</include>
+                                        <include>org.slf4j.**</include>
+                                        <include>org.springframework.**</include>
+                                        <include>org.junit.**</include>
+                                        <include>org.latencyutils.**</include>
+                                        <include>org.hdrhistogram.**</include>
+                                        <include>org.jetbrains.**</include>
+                                        <include>com.fasterxml.**</include>
+                                        <include>com.google.**</include>
+                                        <include>io.netty.**</include>
+                                        <include>io.projectreactor.**</include>
+                                        <include>io.zipkin.**</include>
+                                        <include>io.reactivex.**</include>
+                                        <include>javax.enterprise.**</include>
+                                        <include>javax.inject.**</include>
+                                        <include>cn.hutool.**</include>
+                                    </includes>
+                                    <!-- 不需要重命名的包 -->
+                                    <excludes>
+                                        <exclude>${project.groupId}.**</exclude>
+                                        <exclude>com.taosdata.**</exclude>
+                                        <exclude>io.lettuce.**</exclude>
+                                        <exclude>uml.tech.**</exclude>
+                                        <exclude>sunyu.**</exclude>
+                                    </excludes>
                                 </relocation>
                             </relocations>
                             <transformers>
                                 <!-- 合并META-INF/services文件 -->
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-                                <!-- 处理Apache许可证 -->
+                                <!-- 处理Apache的META-INF/DISCLAIMER文件 -->
                                 <transformer
-                                        implementation="org.apache.maven.plugins.shade.resource.ApacheLicenseResourceTransformer"/>
+                                        implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/DISCLAIMER</resource>
+                                </transformer>
+                                <!-- 处理MANIFEST.MF文件 -->
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <manifestEntries>
+                                        <Multi-Release>true</Multi-Release>
+                                    </manifestEntries>
+                                </transformer>
                             </transformers>
                             <shadedArtifactAttached>true</shadedArtifactAttached>
                             <shadedClassifierName>shaded</shadedClassifierName>
@@ -150,9 +174,6 @@
                                         <exclude>META-INF/*.SF</exclude>
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
-                                        <!-- 排除重复的NOTICE文件 -->
-                                        <exclude>META-INF/NOTICE*</exclude>
-                                        <exclude>META-INF/LICENSE*</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
