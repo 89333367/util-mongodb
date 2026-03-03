@@ -388,7 +388,8 @@ public class MongoDBUtil implements AutoCloseable {
         }
 
         if (clazz == Document.class) {
-            return (T) document;
+            // 使用Class.cast()方法进行类型安全的转换，避免unchecked cast警告
+            return clazz.cast(document);
         }
 
         try {
