@@ -387,6 +387,10 @@ public class MongoDBUtil implements AutoCloseable {
             return null;
         }
 
+        if (clazz == Document.class) {
+            return (T) document;
+        }
+
         try {
             T entity = clazz.getDeclaredConstructor().newInstance();
 

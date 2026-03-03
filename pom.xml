@@ -7,7 +7,7 @@
     <groupId>sunyu.util</groupId>
     <artifactId>util-mongodb</artifactId>
     <!-- {mongodb.driver.version}_{util.version}_{jdk.version}_{architecture.version} -->
-    <version>5.6.2_2.0_jdk8_x64</version>
+    <version>5.6.4_1.0_jdk8_x64</version>
 
     <properties>
         <java.version>1.8</java.version>
@@ -42,45 +42,36 @@
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongodb-driver-core</artifactId>
-            <version>5.6.2</version>
+            <version>5.6.4</version>
+            <optional>true</optional>
         </dependency>
         <!-- https://central.sonatype.com/artifact/org.mongodb/mongodb-driver-sync/versions -->
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongodb-driver-sync</artifactId>
-            <version>5.6.2</version>
+            <version>5.6.4</version>
+            <optional>true</optional>
         </dependency>
         <!-- https://central.sonatype.com/artifact/org.mongodb/bson/versions -->
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>bson</artifactId>
-            <version>5.6.2</version>
+            <version>5.6.4</version>
+            <optional>true</optional>
         </dependency>
         <!-- https://central.sonatype.com/artifact/org.mongodb/bson-record-codec/versions -->
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>bson-record-codec</artifactId>
-            <version>5.6.2</version>
+            <version>5.6.4</version>
+            <optional>true</optional>
         </dependency>
-        <!-- https://central.sonatype.com/artifact/com.github.luben/zstd-jni/versions -->
-        <dependency>
-            <groupId>com.github.luben</groupId>
-            <artifactId>zstd-jni</artifactId>
-            <version>1.5.7-6</version>
-        </dependency>
-        <!-- https://central.sonatype.com/artifact/org.xerial.snappy/snappy-java/versions -->
-        <dependency>
-            <groupId>org.xerial.snappy</groupId>
-            <artifactId>snappy-java</artifactId>
-            <version>1.1.10.8</version>
-        </dependency>
-
 
         <!-- https://central.sonatype.com/artifact/org.junit.jupiter/junit-jupiter/versions -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.14.2</version>
+            <version>5.14.3</version>
             <scope>test</scope>
         </dependency>
 
@@ -147,6 +138,10 @@
                                 <relocation>
                                     <pattern>org.jetbrains</pattern>
                                     <shadedPattern>relocations.${project.groupId}.org.jetbrains</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.mongodb</pattern>
+                                    <shadedPattern>relocations.${project.groupId}.org.mongodb</shadedPattern>
                                 </relocation>
                                 <!-- FasterXML 相关包 -->
                                 <relocation>
@@ -252,7 +247,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.4</version>
+                <version>3.5.5</version>
                 <configuration>
                     <skip>true</skip>
                 </configuration>
@@ -263,7 +258,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.14.1</version>
+                <version>3.15.0</version>
                 <configuration>
                     <source>${java.version}</source>
                     <target>${java.version}</target>
@@ -271,12 +266,13 @@
                 </configuration>
             </plugin>
 
-            <!-- https://central.sonatype.com/artifact/org.apache.maven.plugins/maven-surefire-plugin/versions -->
+            <!--
+            https://central.sonatype.com/artifact/org.apache.maven.plugins/maven-surefire-plugin/versions -->
             <!-- Maven的标准测试插件 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.4</version>
+                <version>3.5.5</version>
             </plugin>
         </plugins>
     </build>

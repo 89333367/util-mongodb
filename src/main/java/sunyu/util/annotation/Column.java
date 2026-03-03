@@ -20,6 +20,6 @@ public @interface Column {
     /**
      * 列描述信息
      */
-    String desc() default "";
+    String comment() default "";
 
 }

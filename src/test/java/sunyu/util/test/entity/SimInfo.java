@@ -5,79 +5,79 @@ import sunyu.util.annotation.Column;
 import java.time.LocalDateTime;
 
 public class SimInfo {
-    @Column(column = "create_time", desc = "创建时间")
+    @Column(column = "create_time", comment = "创建时间")
     private LocalDateTime createTime;
 
-    @Column(column = "update_time", desc = "更新时间")
+    @Column(column = "update_time", comment = "更新时间")
     private LocalDateTime updateTime;
 
-    @Column(column = "sim_iccid", desc = "ICCID")
+    @Column(column = "sim_iccid", comment = "ICCID")
     private String simIccid;
 
-    @Column(column = "sim_msisdn", desc = "SIM卡号")
+    @Column(column = "sim_msisdn", comment = "SIM卡号")
     private String simMsisdn;
 
-    @Column(column = "device_id", desc = "终端编号")
+    @Column(column = "device_id", comment = "终端编号")
     private String deviceId;
 
-    @Column(column = "device_customer_name", desc = "客户名称")
+    @Column(column = "device_customer_name", comment = "客户名称")
     private String deviceCustomerName;
 
-    @Column(column = "device_shipping_time", desc = "发货时间")
+    @Column(column = "device_shipping_time", comment = "发货时间")
     private LocalDateTime deviceShippingTime;
 
-    @Column(column = "sim_status", desc = "SIM卡状态")
+    @Column(column = "sim_status", comment = "SIM卡状态")
     private String simStatus;
 
-    @Column(column = "sim_status_raw", desc = "运营商卡状态")
+    @Column(column = "sim_status_raw", comment = "运营商卡状态")
     private String simStatusRaw;
 
-    @Column(column = "sim_activation_time", desc = "SIM卡激活时间")
+    @Column(column = "sim_activation_time", comment = "SIM卡激活时间")
     private LocalDateTime simActivationTime;
 
-    @Column(column = "sim_deactivation_period", desc = "SIM卡注销时间")
+    @Column(column = "sim_deactivation_period", comment = "SIM卡注销时间")
     private LocalDateTime simDeactivationPeriod;
 
-    @Column(column = "service_expiration_time", desc = "服务到期时间")
+    @Column(column = "service_expiration_time", comment = "服务到期时间")
     private LocalDateTime serviceExpirationTime;
 
-    @Column(column = "sim_operator", desc = "运营商")
+    @Column(column = "sim_operator", comment = "运营商")
     private String simOperator;
 
-    @Column(column = "sim_plan", desc = "SIM卡套餐")
+    @Column(column = "sim_plan", comment = "SIM卡套餐")
     private String simPlan;
 
-    @Column(column = "sim_price", desc = "SIM卡单价")
+    @Column(column = "sim_price", comment = "SIM卡单价")
     private String simPrice;
 
-    @Column(column = "sim_purchase_time", desc = "SIM卡购买时间")
+    @Column(column = "sim_purchase_time", comment = "SIM卡购买时间")
     private LocalDateTime simPurchaseTime;
 
-    @Column(column = "device_imei", desc = "IMEI")
+    @Column(column = "device_imei", comment = "IMEI")
     private String deviceImei;
 
-    @Column(column = "device_model", desc = "终端型号")
+    @Column(column = "device_model", comment = "终端型号")
     private String deviceModel;
 
-    @Column(column = "device_type", desc = "终端类型")
+    @Column(column = "device_type", comment = "终端类型")
     private String deviceType;
 
-    @Column(column = "device_protocol", desc = "通讯协议")
+    @Column(column = "device_protocol", comment = "通讯协议")
     private String deviceProtocol;
 
-    @Column(column = "device_working_condition_id", desc = "工况ID")
+    @Column(column = "device_working_condition_id", comment = "工况ID")
     private String deviceWorkingConditionId;
 
-    @Column(column = "device_logistics_no", desc = "物流单号")
+    @Column(column = "device_logistics_no", comment = "物流单号")
     private String deviceLogisticsNo;
 
-    @Column(column = "api_type", desc = "卡商")
+    @Column(column = "api_type", comment = "卡商")
     private String apiType;
 
-    @Column(column = "api_sim_status_update_time", desc = "SIM卡状态最后同步时间")
+    @Column(column = "api_sim_status_update_time", comment = "SIM卡状态最后同步时间")
     private LocalDateTime apiSimStatusUpdateTime;
 
-    @Column(column = "api_sim_traffic_update_time", desc = "SIM卡流量最后同步时间")
+    @Column(column = "api_sim_traffic_update_time", comment = "SIM卡流量最后同步时间")
     private LocalDateTime apiSimTrafficUpdateTime;
 
     public LocalDateTime getCreateTime() {
