@@ -15,8 +15,8 @@
 <dependency>
     <groupId>sunyu.util</groupId>
     <artifactId>util-mongodb</artifactId>
-    <!-- {mongodb.driver.version}_{util.version}_{jdk.version}_{architecture.version} -->
-    <version>5.6.4_1.0_jdk8_x64</version>
+    <!-- {mongodb.driver.version}_{util.version}_{jdk.version} -->
+    <version>5.6.4_1.0_jdk8</version>
     <classifier>shaded</classifier>
 </dependency>
 ```

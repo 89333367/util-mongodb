@@ -107,6 +107,13 @@ public class MongoDBUtilTests {
     }
 
     @Test
+    void 统计数量() {
+        Bson filter = Filters.eq("device_id", "YXZ2612212234032");
+        long count = mongoDBUtil.count(new MongoQuery(simInfoCollection).setFilter(filter));
+        log.info("{}", count);
+    }
+
+    @Test
     void 统计无卡号信息卡数量() {
         // 查询不存在sim_msisdn字段、或者字段为null、或者字段为空字符串的文档
         Bson filter = Filters.or(

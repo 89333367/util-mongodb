@@ -26,7 +26,66 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.function.Consumer;
 
+/**
+ * MongoDB操作工具类
+ * <p>
+ * 该工具类封装了MongoDB的常用操作，提供简洁易用的API接口，
+ * 包括文档的增删改查、聚合查询、分组统计、左外连接等功能。
+ * </p>
+ *
+ * <h2>主要功能</h2>
+ * <ul>
+ *   <li>文档操作：插入单条/多条、更新、删除</li>
+ *   <li>查询操作：findFirst、find（支持列表返回和流式处理）</li>
+ *   <li>聚合操作：分组统计、左外连接</li>
+ *   <li>实体转换：支持Java对象与Document的相互转换</li>
+ *   <li>自动时间戳：自动维护create_time和update_time字段</li>
+ *   <li>时区支持：可配置默认时区，用于LocalDateTime与Date的转换</li>
+ * </ul>
+ *
+ * <h2>使用示例</h2>
+ * <pre>
+ * // 创建工具类实例
+ * MongoDBUtil mongoDBUtil = MongoDBUtil.builder()
+ *     .setUri("mongodb://localhost:27017")
+ *     .setDefaultZoneId(ZoneId.systemDefault())
+ *     .build();
+ *
+ * try (mongoDBUtil) {
+ *     // 获取数据库和集合
+ *     MongoDatabase database = mongoDBUtil.getDatabase("test");
+ *     MongoCollection&lt;Document&gt; collection = mongoDBUtil.getCollection(database, "users");
+ *
+ *     // 插入文档
+ *     Map&lt;String, Object&gt; data = new HashMap&lt;&gt;();
+ *     data.put("name", "张三");
+ *     data.put("age", 25);
+ *     mongoDBUtil.insertOne(collection, data);
+ *
+ *     // 查询文档
+ *     MongoQuery query = new MongoQuery();
+ *     query.setCollection(collection);
+ *     query.setFilter(Filters.eq("name", "张三"));
+ *     Document doc = mongoDBUtil.findFirst(query);
+ * }
+ * </pre>
+ *
+ * <h2>注意事项</h2>
+ * <ul>
+ *   <li>该类实现了AutoCloseable接口，建议使用try-with-resources语句自动释放资源</li>
+ *   <li>实体转换需要使用{@link sunyu.util.annotation.Column @Column}注解标注字段</li>
+ *   <li>时区配置默认为UTC，可通过Builder进行自定义</li>
+ * </ul>
+ *
+ * @author sunyu
+ * @version 1.0
+ * @since 1.0
+ * @see AutoCloseable
+ * @see MongoQuery
+ * @see sunyu.util.annotation.Column
+ */
 public class MongoDBUtil implements AutoCloseable {
     private final Log log = LogFactory.get();
     private final Config config;
@@ -67,7 +126,17 @@ public class MongoDBUtil implements AutoCloseable {
     public static class Builder {
         private final Config config = new Config();
 
+        /**
+         * 构建MongoDBUtil实例
+         *
+         * @return MongoDBUtil实例
+         * @throws IllegalArgumentException 如果uri未配置
+         */
         public MongoDBUtil build() {
+            // 参数校验
+            if (StrUtil.isBlank(config.uri)) {
+                throw new IllegalArgumentException("MongoDB URI cannot be blank");
+            }
             return new MongoDBUtil(config);
         }
 
@@ -198,6 +267,10 @@ public class MongoDBUtil implements AutoCloseable {
      * @return 数据库
      */
     public MongoDatabase getDatabase(String databaseName) {
+        // 参数校验
+        if (StrUtil.isBlank(databaseName)) {
+            throw new IllegalArgumentException("databaseName cannot be blank");
+        }
         return config.mongoClient.getDatabase(databaseName);
     }
 
@@ -209,6 +282,13 @@ public class MongoDBUtil implements AutoCloseable {
      * @return 集合
      */
     public MongoCollection<Document> getCollection(MongoDatabase database, String collectionName) {
+        // 参数校验
+        if (database == null) {
+            throw new IllegalArgumentException("database cannot be null");
+        }
+        if (StrUtil.isBlank(collectionName)) {
+            throw new IllegalArgumentException("collectionName cannot be blank");
+        }
         return database.getCollection(collectionName);
     }
 
@@ -219,6 +299,11 @@ public class MongoDBUtil implements AutoCloseable {
      * @return Json字符串
      */
     public String toAggregationsJson(List<Bson> pipeline) {
+        // 参数校验
+        if (pipeline == null) {
+            throw new IllegalArgumentException("pipeline cannot be null");
+        }
+        
         List<String> stageJsons = new ArrayList<>();
         // 关键点：指定 Shell 模式的序列化配置
         JsonWriterSettings settings = JsonWriterSettings.builder()
@@ -231,7 +316,36 @@ public class MongoDBUtil implements AutoCloseable {
         return "[" + String.join(",", stageJsons) + "]";
     }
 
+    /**
+     * 插入单条文档到指定集合
+     * <p>
+     * 该方法会自动为文档添加两个时间戳字段：
+     * <ul>
+     *   <li>create_time：创建时间，使用当前时间</li>
+     *   <li>update_time：更新时间，使用当前时间</li>
+     * </ul>
+     * 时间戳使用配置的默认时区进行处理。
+     * </p>
+     *
+     * @param collection MongoDB集合对象，指定要插入文档的集合
+     * @param data       要插入的文档数据，使用Map<String, ?>格式存储
+     * @return InsertOneResult 插入操作的结果，包含插入文档的ID等信息
+     * @throws IllegalArgumentException 如果 collection 或 data 为 null
+     * @see MongoCollection
+     * @see InsertOneResult
+     * @see Map
+     * @since 1.0
+     * @author sunyu
+     */
     public InsertOneResult insertOne(MongoCollection<Document> collection, Map<String, ?> data) {
+        // 参数校验
+        if (collection == null) {
+            throw new IllegalArgumentException("collection cannot be null");
+        }
+        if (data == null) {
+            throw new IllegalArgumentException("data cannot be null");
+        }
+        
         Document document = new Document();
         document.append(config.CREATE_TIME, LocalDateTime.now());
         document.append(config.UPDATE_TIME, LocalDateTime.now());
@@ -239,14 +353,83 @@ public class MongoDBUtil implements AutoCloseable {
         return collection.insertOne(document);
     }
 
+    /**
+     * 将实体对象转换为文档并插入到指定集合
+     * <p>
+     * 该方法会先使用 {@link #toDocument(Object)} 方法将实体对象转换为MongoDB Document，
+     * 然后自动为文档添加两个时间戳字段：
+     * <ul>
+     *   <li>create_time：创建时间，使用当前时间</li>
+     *   <li>update_time：更新时间，使用当前时间</li>
+     * </ul>
+     * 时间戳使用配置的默认时区进行处理。
+     * </p>
+     * <p>
+     * <b>注意：</b>实体对象需要使用 {@link sunyu.util.annotation.Column @Column} 注解标注需要映射的字段。
+     * </p>
+     *
+     * @param collection MongoDB集合对象，指定要插入文档的集合
+     * @param entity     要插入的实体对象
+     * @return InsertOneResult 插入操作的结果，包含插入文档的ID等信息
+     * @throws IllegalArgumentException 如果 collection 或 entity 为 null
+     * @throws RuntimeException         如果实体转换为文档失败
+     * @see MongoCollection
+     * @see InsertOneResult
+     * @see #toDocument(Object)
+     * @see sunyu.util.annotation.Column
+     * @since 1.0
+     * @author sunyu
+     */
     public InsertOneResult insertOneEntity(MongoCollection<Document> collection, Object entity) {
+        // 参数校验
+        if (collection == null) {
+            throw new IllegalArgumentException("collection cannot be null");
+        }
+        if (entity == null) {
+            throw new IllegalArgumentException("entity cannot be null");
+        }
+        
         Document document = toDocument(entity);
         document.append(config.CREATE_TIME, LocalDateTime.now());
         document.append(config.UPDATE_TIME, LocalDateTime.now());
         return collection.insertOne(document);
     }
 
+    /**
+     * 批量插入文档到指定集合
+     * <p>
+     * 该方法会为每个文档自动添加两个时间戳字段：
+     * <ul>
+     *   <li>create_time：创建时间，使用当前时间</li>
+     *   <li>update_time：更新时间，使用当前时间</li>
+     * </ul>
+     * 时间戳使用配置的默认时区进行处理。
+     * 所有文档会在一次批量操作中插入，提高性能。
+     * </p>
+     *
+     * @param collection MongoDB集合对象，指定要插入文档的集合
+     * @param dataList   要插入的文档数据列表，每个元素使用Map<String, ?>格式存储
+     * @return InsertManyResult 批量插入操作的结果，包含所有插入文档的ID等信息
+     * @throws IllegalArgumentException 如果 collection 或 dataList 为 null
+     * @throws IllegalArgumentException 如果 dataList 为空列表
+     * @see MongoCollection
+     * @see InsertManyResult
+     * @see List
+     * @since 1.0
+     * @author sunyu
+     */
     public InsertManyResult insertMany(MongoCollection<Document> collection, List<Map<String, ?>> dataList) {
+        // 参数校验
+        if (collection == null) {
+            throw new IllegalArgumentException("collection cannot be null");
+        }
+        if (dataList == null) {
+            throw new IllegalArgumentException("dataList cannot be null");
+        }
+        if (dataList.isEmpty()) {
+            throw new IllegalArgumentException("dataList cannot be empty");
+        }
+        
         List<Document> documents = new ArrayList<>();
         for (Map<String, ?> data : dataList) {
             Document document = new Document();
@@ -258,7 +441,48 @@ public class MongoDBUtil implements AutoCloseable {
         return collection.insertMany(documents);
     }
 
+    /**
+     * 批量将实体对象转换为文档并插入到指定集合
+     * <p>
+     * 该方法会先使用 {@link #toDocument(Object)} 方法将每个实体对象转换为MongoDB Document，
+     * 然后为每个文档自动添加两个时间戳字段：
+     * <ul>
+     *   <li>create_time：创建时间，使用当前时间</li>
+     *   <li>update_time：更新时间，使用当前时间</li>
+     * </ul>
+     * 时间戳使用配置的默认时区进行处理。
+     * 所有文档会在一次批量操作中插入，提高性能。
+     * </p>
+     * <p>
+     * <b>注意：</b>实体对象需要使用 {@link sunyu.util.annotation.Column @Column} 注解标注需要映射的字段。
+     * </p>
+     *
+     * @param collection MongoDB集合对象，指定要插入文档的集合
+     * @param entityList 要插入的实体对象列表
+     * @return InsertManyResult 批量插入操作的结果，包含所有插入文档的ID等信息
+     * @throws IllegalArgumentException 如果 collection 或 entityList 为 null
+     * @throws IllegalArgumentException 如果 entityList 为空列表
+     * @throws RuntimeException         如果任一实体转换为文档失败
+     * @see MongoCollection
+     * @see InsertManyResult
+     * @see List
+     * @see #toDocument(Object)
+     * @see sunyu.util.annotation.Column
+     * @since 1.0
+     * @author sunyu
+     */
     public InsertManyResult insertManyEntity(MongoCollection<Document> collection, List<Object> entityList) {
+        // 参数校验
+        if (collection == null) {
+            throw new IllegalArgumentException("collection cannot be null");
+        }
+        if (entityList == null) {
+            throw new IllegalArgumentException("entityList cannot be null");
+        }
+        if (entityList.isEmpty()) {
+            throw new IllegalArgumentException("entityList cannot be empty");
+        }
+        
         List<Document> documents = new ArrayList<>();
         for (Object entity : entityList) {
             Document document = toDocument(entity);
@@ -269,14 +493,98 @@ public class MongoDBUtil implements AutoCloseable {
         return collection.insertMany(documents);
     }
 
+    /**
+     * 保存或更新文档（使用Map数据）
+     * <p>
+     * 该方法会根据过滤条件查找文档，如果找到则更新，否则插入新文档。
+     * 默认不会更新空值，空字符串也会被忽略。
+     * 会自动维护create_time和update_time字段。
+     * </p>
+     *
+     * @param collection MongoDB集合对象，指定要操作的集合
+     * @param filter     过滤条件，用于查找要更新的文档
+     * @param data       要保存或更新的数据，使用Map<String, ?>格式
+     * @return UpdateResult 更新操作的结果，包含匹配和修改的文档数量等信息
+     * @throws IllegalArgumentException 如果 collection 或 filter 为 null
+     * @see MongoCollection
+     * @see UpdateResult
+     * @see #saveOrUpdate(MongoCollection, Bson, Map, Boolean)
+     * @since 1.0
+     * @author sunyu
+     */
     public UpdateResult saveOrUpdate(MongoCollection<Document> collection, Bson filter, Map<String, ?> data) {
+        // 参数校验
+        if (collection == null) {
+            throw new IllegalArgumentException("collection cannot be null");
+        }
+        if (filter == null) {
+            throw new IllegalArgumentException("filter cannot be null");
+        }
         return saveOrUpdate(collection, filter, data, false);
     }
 
+    /**
+     * 保存或更新文档（使用实体对象）
+     * <p>
+     * 该方法会根据过滤条件查找文档，如果找到则更新，否则插入新文档。
+     * 默认不会更新空值，空字符串也会被忽略。
+     * 会自动维护create_time和update_time字段。
+     * </p>
+     * <p>
+     * <b>注意：</b>实体对象需要使用 {@link sunyu.util.annotation.Column @Column} 注解标注需要映射的字段。
+     * </p>
+     *
+     * @param collection MongoDB集合对象，指定要操作的集合
+     * @param filter     过滤条件，用于查找要更新的文档
+     * @param entity     要保存或更新的实体对象
+     * @return UpdateResult 更新操作的结果，包含匹配和修改的文档数量等信息
+     * @throws IllegalArgumentException 如果 collection 或 filter 或 entity 为 null
+     * @throws RuntimeException         如果实体转换为文档失败
+     * @see MongoCollection
+     * @see UpdateResult
+     * @see #saveOrUpdateEntity(MongoCollection, Bson, Object, Boolean)
+     * @see sunyu.util.annotation.Column
+     * @since 1.0
+     * @author sunyu
+     */
     public UpdateResult saveOrUpdateEntity(MongoCollection<Document> collection, Bson filter, Object entity) {
+        // 参数校验
+        if (collection == null) {
+            throw new IllegalArgumentException("collection cannot be null");
+        }
+        if (filter == null) {
+            throw new IllegalArgumentException("filter cannot be null");
+        }
+        if (entity == null) {
+            throw new IllegalArgumentException("entity cannot be null");
+        }
         return saveOrUpdateEntity(collection, filter, entity, false);
     }
 
+    /**
+     * 保存或更新文档（使用实体对象，支持强制更新空值）
+     * <p>
+     * 该方法会根据过滤条件查找文档，如果找到则更新，否则插入新文档。
+     * 会自动维护create_time和update_time字段。
+     * </p>
+     * <p>
+     * <b>注意：</b>实体对象需要使用 {@link sunyu.util.annotation.Column @Column} 注解标注需要映射的字段。
+     * </p>
+     *
+     * @param collection  MongoDB集合对象，指定要操作的集合
+     * @param filter      过滤条件，用于查找要更新的文档
+     * @param entity      要保存或更新的实体对象
+     * @param forceUpdate 是否强制更新空值，true时即使值为空也会更新到数据库
+     * @return UpdateResult 更新操作的结果，包含匹配和修改的文档数量等信息
+     * @throws IllegalArgumentException 如果 collection 或 filter 或 entity 为 null
+     * @throws RuntimeException         如果实体转换为文档失败
+     * @see MongoCollection
+     * @see UpdateResult
+     * @see #toDocument(Object)
+     * @see sunyu.util.annotation.Column
+     * @since 1.0
+     * @author sunyu
+     */
     public UpdateResult saveOrUpdateEntity(MongoCollection<Document> collection, Bson filter, Object entity, Boolean forceUpdate) {
         // 获取当前时间
         LocalDateTime now = LocalDateTime.now();
@@ -322,7 +630,33 @@ public class MongoDBUtil implements AutoCloseable {
         return collection.updateMany(filter, Updates.combine(updates), options);
     }
 
+    /**
+     * 保存或更新文档（使用Map数据，支持强制更新空值）
+     * <p>
+     * 该方法会根据过滤条件查找文档，如果找到则更新，否则插入新文档。
+     * 会自动维护create_time和update_time字段。
+     * </p>
+     *
+     * @param collection  MongoDB集合对象，指定要操作的集合
+     * @param filter      过滤条件，用于查找要更新的文档
+     * @param data        要保存或更新的数据，使用Map<String, ?>格式
+     * @param forceUpdate 是否强制更新空值，true时即使值为空也会更新到数据库
+     * @return UpdateResult 更新操作的结果，包含匹配和修改的文档数量等信息
+     * @throws IllegalArgumentException 如果 collection 或 filter 为 null
+     * @see MongoCollection
+     * @see UpdateResult
+     * @since 1.0
+     * @author sunyu
+     */
     public UpdateResult saveOrUpdate(MongoCollection<Document> collection, Bson filter, Map<String, ?> data, Boolean forceUpdate) {
+        // 参数校验
+        if (collection == null) {
+            throw new IllegalArgumentException("collection cannot be null");
+        }
+        if (filter == null) {
+            throw new IllegalArgumentException("filter cannot be null");
+        }
+        
         // 获取当前时间
         LocalDateTime now = LocalDateTime.now();
 
@@ -366,11 +700,62 @@ public class MongoDBUtil implements AutoCloseable {
         return collection.updateMany(filter, Updates.combine(updates), options);
     }
 
+    /**
+     * 删除符合过滤条件的所有文档
+     * <p>
+     * 该方法会删除所有匹配过滤条件的文档。
+     * 如果需要只删除单个文档，请使用 MongoDB 原生驱动的 deleteOne 方法。
+     * </p>
+     *
+     * @param collection MongoDB集合对象，指定要操作的集合
+     * @param filter     过滤条件，用于查找要删除的文档
+     * @return DeleteResult 删除操作的结果，包含删除的文档数量等信息
+     * @throws IllegalArgumentException 如果 collection 或 filter 为 null
+     * @see MongoCollection
+     * @see DeleteResult
+     * @since 1.0
+     * @author sunyu
+     */
     public DeleteResult delete(MongoCollection<Document> collection, Bson filter) {
+        // 参数校验
+        if (collection == null) {
+            throw new IllegalArgumentException("collection cannot be null");
+        }
+        if (filter == null) {
+            throw new IllegalArgumentException("filter cannot be null");
+        }
         return collection.deleteMany(filter);
     }
 
+    /**
+     * 执行批量写入操作
+     * <p>
+     * 该方法可以执行多个写入操作（插入、更新、删除）的组合，
+     * 在一次批量操作中完成，提高性能。
+     * </p>
+     *
+     * @param collection MongoDB集合对象，指定要操作的集合
+     * @param requests   写入操作列表，可以包含插入、更新、删除等多种操作
+     * @return BulkWriteResult 批量写入操作的结果，包含各操作的执行情况等信息
+     * @throws IllegalArgumentException 如果 collection 或 requests 为 null
+     * @throws IllegalArgumentException 如果 requests 为空列表
+     * @see MongoCollection
+     * @see BulkWriteResult
+     * @see WriteModel
+     * @since 1.0
+     * @author sunyu
+     */
     public BulkWriteResult bulkWrite(MongoCollection<Document> collection, List<? extends WriteModel<? extends Document>> requests) {
+        // 参数校验
+        if (collection == null) {
+            throw new IllegalArgumentException("collection cannot be null");
+        }
+        if (requests == null) {
+            throw new IllegalArgumentException("requests cannot be null");
+        }
+        if (requests.isEmpty()) {
+            throw new IllegalArgumentException("requests cannot be empty");
+        }
         return collection.bulkWrite(requests);
     }
 
@@ -473,6 +858,14 @@ public class MongoDBUtil implements AutoCloseable {
      * @return 文档数量
      */
     public long count(MongoQuery mongoQuery) {
+        // 参数校验
+        if (mongoQuery == null) {
+            throw new IllegalArgumentException("mongoQuery cannot be null");
+        }
+        if (mongoQuery.getCollection() == null) {
+            throw new IllegalArgumentException("mongoQuery.getCollection() cannot be null");
+        }
+        
         if (CollUtil.isEmpty(mongoQuery.getGroupFields())) {
             return mongoQuery.getCollection().countDocuments(mongoQuery.getFilter());
         } else {
@@ -493,7 +886,7 @@ public class MongoDBUtil implements AutoCloseable {
 
             Document result = mongoQuery.getCollection().aggregate(pipeline).first();
             if (result != null) {
-                return result.getInteger("__totalGroups");
+                return result.getLong("__totalGroups");
             }
         }
         return 0;
@@ -508,6 +901,17 @@ public class MongoDBUtil implements AutoCloseable {
      * @return 转换后的实体对象
      */
     public <T> T findFirst(Class<T> clazz, MongoQuery mongoQuery) {
+        // 参数校验
+        if (clazz == null) {
+            throw new IllegalArgumentException("clazz cannot be null");
+        }
+        if (mongoQuery == null) {
+            throw new IllegalArgumentException("mongoQuery cannot be null");
+        }
+        if (mongoQuery.getCollection() == null) {
+            throw new IllegalArgumentException("mongoQuery.getCollection() cannot be null");
+        }
+        
         FindIterable<Document> documents = mongoQuery.getCollection().find(mongoQuery.getFilter());
         if (mongoQuery.getProjection() != null) {
             documents.projection(mongoQuery.getProjection());
@@ -522,7 +926,58 @@ public class MongoDBUtil implements AutoCloseable {
      * @return MongoDB文档
      */
     public Document findFirst(MongoQuery mongoQuery) {
+        // 参数校验
+        if (mongoQuery == null) {
+            throw new IllegalArgumentException("mongoQuery cannot be null");
+        }
         return findFirst(Document.class, mongoQuery);
+    }
+
+
+    /**
+     * 查询符合条件的文档并通过消费者函数逐个处理
+     * <p>
+     * 该方法使用流式处理方式，避免一次性加载所有文档到内存中，
+     * 适用于处理大量数据的场景。查询结果会以 Document 对象的形式
+     * 逐个传递给消费者函数进行处理。
+     * </p>
+     *
+     * @param mongoQuery 查询对象，包含查询条件、投影、分页等参数
+     * @param consumer   消费者函数，用于处理每个查询到的 Document 对象
+     * @throws IllegalArgumentException 如果 mongoQuery 或 consumer 为 null
+     * @author sunyu
+     * @see Consumer
+     * @see Document
+     * @see MongoQuery
+     * @since 1.0
+     */
+    public void find(MongoQuery mongoQuery, Consumer<Document> consumer) {
+        // 参数校验
+        if (mongoQuery == null) {
+            throw new IllegalArgumentException("mongoQuery cannot be null");
+        }
+        if (consumer == null) {
+            throw new IllegalArgumentException("consumer cannot be null");
+        }
+        if (mongoQuery.getCollection() == null) {
+            throw new IllegalArgumentException("mongoQuery.getCollection() cannot be null");
+        }
+        
+        FindIterable<Document> documents = mongoQuery.getCollection().find(mongoQuery.getFilter());
+        if (mongoQuery.getProjection() != null) {
+            documents.projection(mongoQuery.getProjection());
+        }
+        if (mongoQuery.getSkip() != null) {
+            documents.skip(mongoQuery.getSkip());
+        }
+        if (mongoQuery.getLimit() != null) {
+            documents.limit(mongoQuery.getLimit());
+        }
+        try (MongoCursor<Document> mongoCursor = documents.iterator();) {
+            while (mongoCursor.hasNext()) {
+                consumer.accept(mongoCursor.next());
+            }
+        }
     }
 
     /**
@@ -534,22 +989,16 @@ public class MongoDBUtil implements AutoCloseable {
      * @return 转换后的实体对象列表
      */
     public <T> List<T> find(Class<T> clazz, MongoQuery mongoQuery) {
-        FindIterable<Document> documents = mongoQuery.getCollection().find(mongoQuery.getFilter());
-        if (mongoQuery.getProjection() != null) {
-            documents.projection(mongoQuery.getProjection());
+        // 参数校验
+        if (clazz == null) {
+            throw new IllegalArgumentException("clazz cannot be null");
         }
-        if (mongoQuery.getSkip() != null) {
-            documents.skip(mongoQuery.getSkip());
+        if (mongoQuery == null) {
+            throw new IllegalArgumentException("mongoQuery cannot be null");
         }
-        if (mongoQuery.getLimit() != null) {
-            documents.limit(mongoQuery.getLimit());
-        }
+        
         List<T> results = new ArrayList<>();
-        try (MongoCursor<Document> mongoCursor = documents.iterator();) {
-            while (mongoCursor.hasNext()) {
-                results.add(toEntity(mongoCursor.next(), clazz));
-            }
-        }
+        find(mongoQuery, document -> results.add(toEntity(document, clazz)));
         return results;
     }
 
@@ -560,19 +1009,53 @@ public class MongoDBUtil implements AutoCloseable {
      * @return MongoDB文档列表
      */
     public List<Document> find(MongoQuery mongoQuery) {
+        // 参数校验
+        if (mongoQuery == null) {
+            throw new IllegalArgumentException("mongoQuery cannot be null");
+        }
         return find(Document.class, mongoQuery);
     }
 
     /**
-     * 分组查询
+     * 执行分组查询并通过消费者函数逐个处理分组结果
+     * <p>
+     * 该方法使用MongoDB的聚合管道执行分组查询，支持：
+     * <ul>
+     *   <li>前置过滤条件</li>
+     *   <li>多字段分组</li>
+     *   <li>分组计数（可选）</li>
+     *   <li>自定义投影</li>
+     *   <li>排序</li>
+     *   <li>分页</li>
+     * </ul>
+     * 结果会以Document对象的形式逐个传递给消费者函数进行处理，
+     * 避免一次性加载所有分组结果到内存中，适用于处理大量数据的场景。
+     * </p>
      *
-     * @param mongoQuery 分组查询对象
-     * @return 分组结果
+     * @param mongoQuery 查询对象，包含以下关键参数：
+     *                   <ul>
+     *                     <li>filter：前置过滤条件</li>
+     *                     <li>groupFields：分组字段列表</li>
+     *                     <li>totalName：分组计数字段名（可选）</li>
+     *                     <li>projection：自定义投影（可选）</li>
+     *                     <li>sort：排序条件（可选）</li>
+     *                     <li>skip：跳过记录数（可选）</li>
+     *                     <li>limit：返回记录数（可选）</li>
+     *                   </ul>
+     * @param consumer   消费者函数，用于处理每个分组结果Document对象
+     * @throws IllegalArgumentException 如果 mongoQuery 或 consumer 为 null
+     * @throws IllegalArgumentException 如果 mongoQuery.getGroupFields() 为空
+     * @author sunyu
+     * @see Consumer
+     * @see Document
+     * @see MongoQuery
+     * @see Aggregates
+     * @since 1.0
      */
-    public List<Document> group(MongoQuery mongoQuery) {
+    public void group(MongoQuery mongoQuery, Consumer<Document> consumer) {
         List<Bson> pipeline = new ArrayList<>();
 
-        // 设置过滤条件
+        // 设置前置过滤条件
         pipeline.add(Aggregates.match(mongoQuery.getFilter()));
 
         // 构建分组字段
@@ -622,17 +1105,76 @@ public class MongoDBUtil implements AutoCloseable {
         log.debug("Aggregation Pipeline {}: {}", mongoQuery.getCollection().getNamespace(), toAggregationsJson(pipeline));
 
         // 查询
-        List<Document> results = new ArrayList<>();
         try (MongoCursor<Document> cursor = mongoQuery.getCollection().aggregate(pipeline).iterator();) {
             while (cursor.hasNext()) {
-                results.add(cursor.next());
+                consumer.accept(cursor.next());
             }
         }
+    }
+
+
+    /**
+     * 分组查询
+     *
+     * @param mongoQuery 分组查询对象
+     * @return 分组结果
+     */
+    public List<Document> group(MongoQuery mongoQuery) {
+        // 参数校验
+        if (mongoQuery == null) {
+            throw new IllegalArgumentException("mongoQuery cannot be null");
+        }
+        
+        List<Document> results = new ArrayList<>();
+        group(mongoQuery, results::add);
         return results;
     }
 
 
-    public List<Document> leftOuterJoin(MongoQuery mongoQuery) {
+    /**
+     * 执行左外连接查询并通过消费者函数逐个处理连接结果
+     * <p>
+     * 该方法使用MongoDB的聚合管道执行左外连接查询，支持：
+     * <ul>
+     *   <li>主表前置过滤条件</li>
+     *   <li>主表排序</li>
+     *   <li>右表过滤条件</li>
+     *   <li>右表字段投影</li>
+     *   <li>限制右表返回记录数</li>
+     *   <li>将右表字段合并到主文档（可选）</li>
+     *   <li>主表字段投影</li>
+     *   <li>分页</li>
+     * </ul>
+     * 结果会以Document对象的形式逐个传递给消费者函数进行处理，
+     * 避免一次性加载所有连接结果到内存中，适用于处理大量数据的场景。
+     * </p>
+     *
+     * @param mongoQuery 查询对象，包含以下关键参数：
+     *                  <ul>
+     *                    <li>filter：主表前置过滤条件</li>
+     *                    <li>sort：主表排序条件（可选）</li>
+     *                    <li>rightFilter：右表过滤条件</li>
+     *                    <li>leftJoinField：主表连接字段</li>
+     *                    <li>rightJoinField：右表连接字段</li>
+     *                    <li>rightCollectionName：右表集合名称</li>
+     *                    <li>rightProjection：右表字段投影（可选）</li>
+     *                    <li>rightLimit：右表返回记录数限制（默认1）</li>
+     *                    <li>mergeRightObjectsToLeft：是否将右表字段合并到主文档（可选）</li>
+     *                    <li>projection：主表字段投影（可选）</li>
+     *                    <li>skip：跳过记录数（可选）</li>
+     *                    <li>limit：返回记录数（可选）</li>
+     *                  </ul>
+     * @param consumer   消费者函数，用于处理每个连接结果Document对象
+     * @throws IllegalArgumentException 如果 mongoQuery 或 consumer 为 null
+     * @throws IllegalArgumentException 如果必要的连接参数为空
+     * @see Consumer
+     * @see Document
+     * @see MongoQuery
+     * @see Aggregates
+     * @since 1.0
+     * @author sunyu
+     */
+    public void leftOuterJoin(MongoQuery mongoQuery, Consumer<Document> consumer) {
         List<Bson> pipeline = new ArrayList<>();
 
         // 设置过滤条件
@@ -714,12 +1256,21 @@ public class MongoDBUtil implements AutoCloseable {
         log.debug("Aggregation Pipeline {}: {}", mongoQuery.getCollection().getNamespace(), toAggregationsJson(pipeline));
 
         // 查询
-        List<Document> results = new ArrayList<>();
         try (MongoCursor<Document> cursor = mongoQuery.getCollection().aggregate(pipeline).iterator();) {
             while (cursor.hasNext()) {
-                results.add(cursor.next());
+                consumer.accept(cursor.next());
             }
         }
+    }
+
+    public List<Document> leftOuterJoin(MongoQuery mongoQuery) {
+        // 参数校验
+        if (mongoQuery == null) {
+            throw new IllegalArgumentException("mongoQuery cannot be null");
+        }
+        
+        List<Document> results = new ArrayList<>();
+        leftOuterJoin(mongoQuery, results::add);
         return results;
     }
 
